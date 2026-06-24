@@ -8,7 +8,7 @@ Built on [CTSpinoPelvic1K](https://github.com/Gregory-Schwing-MD-PhD/CTSpinoPelv
 
 ![Lateral DRR with auto-projected vertebra-level labels](examples/0003/lateral_annotated.png)
 
-*A lateral DRR rendered from one CTSpinoPelvic1K case (bone emphasis), with per-level boxes/landmarks (T11–S1) projected straight from the 3-D segmentation — no manual radiograph annotation.*
+*A lateral DRR rendered from one CTSpinoPelvic1K case (bone emphasis), with the **lumbosacral** level boxes/landmarks (L1–S1) projected straight from the 3-D segmentation — no manual radiograph annotation. (Thoracic levels are omitted here: this case's v3 thoracic GT is FOV-limited/merged — irrelevant to spinopelvic angles, which need only L1, S1 and the femoral heads.)*
 
 > ⚕️ **Research & educational use only — not a medical device, not for clinical or intra-operative use.**
 
