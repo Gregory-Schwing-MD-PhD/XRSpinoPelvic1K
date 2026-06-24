@@ -14,7 +14,7 @@ def _phantom(D=48):
     on an identity affine (world == index, so +Z superior, +Y anterior, +X left–right)."""
     vol = np.full((D, D, D), -1000.0, np.float32)      # air
     lab = np.zeros((D, D, D), np.int16)
-    zc = {"L3": 14, "L4": 22, "L5": 30}                # cranio-caudal: higher z = superior
+    zc = {"L3": 30, "L4": 22, "L5": 14}                # anatomic: cranial L3 at higher z
     for name, z in zc.items():
         sl = (slice(18, 30), slice(18, 30), slice(z, z + 6))
         vol[sl] = 600.0                                # bone HU

@@ -28,7 +28,7 @@ def _project_point_vox(ijk, plan: Dict, shape) -> List[float]:
     """A voxel index (i,j,k) → image (x=col, y=row), matching the DRR's flips exactly."""
     r = ijk[plan["v_axis"]]
     c = ijk[plan["h_axis"]]
-    if plan["v_sign"] < 0:
+    if plan["v_sign"] > 0:                          # match _orient2d's vertical flip
         r = shape[plan["v_axis"]] - 1 - r
     if plan["h_sign"] > 0:
         c = shape[plan["h_axis"]] - 1 - c

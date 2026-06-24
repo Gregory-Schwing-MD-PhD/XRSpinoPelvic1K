@@ -50,8 +50,9 @@ def _orient2d(a2d, plan: Dict):
     """Reorient a (sum-over-proj-axis) 2-D array to display rows=superior↓, cols=anterior←."""
     rem = sorted([plan["v_axis"], plan["h_axis"]])
     img = a2d if rem[0] == plan["v_axis"] else a2d.T          # rows -> v_axis
-    if plan["v_sign"] < 0:
-        img = img[::-1, :]                                    # superior at top
+    if plan["v_sign"] > 0:                                    # index↑ = superior, so row 0
+        img = img[::-1, :]                                    # would be inferior -> flip up
+
     if plan["h_sign"] > 0:
         img = img[:, ::-1]                                    # anterior at left
     return np.ascontiguousarray(img)
