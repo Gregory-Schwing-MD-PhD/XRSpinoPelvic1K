@@ -1,0 +1,16 @@
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+.venv/
+
+# generated dataset (large) — keep examples/ committed, not full builds
+data/xrsp1k/
+*.npy
+
+# source CT volumes (licensed elsewhere; do not commit)
+*_ct.nii.gz
+*_label.nii.gz

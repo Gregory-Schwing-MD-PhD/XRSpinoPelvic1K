@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xrsp"
+version = "0.1.0"
+description = "XRSpinoPelvic1K — open spinal-radiograph (DRR) dataset + real-time vertebral-level localization, generated from segmented CT."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Gregory Schwing" }]
+keywords = ["spine", "radiograph", "DRR", "fluoroscopy", "level localization", "spinopelvic"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+dependencies = ["numpy>=1.21", "nibabel>=4.0", "pillow>=9.0"]
+
+[project.optional-dependencies]
+train = ["torch>=2.0"]
+dev = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/Gregory-Schwing-MD-PhD/XRSpinoPelvic1K"
+
+[project.scripts]
+xrsp-build = "xrsp.build_dataset:main"
+
+[tool.setuptools.packages.find]
+include = ["xrsp*"]
