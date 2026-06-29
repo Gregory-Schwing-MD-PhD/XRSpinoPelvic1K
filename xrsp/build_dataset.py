@@ -33,11 +33,14 @@ def _save_png(path, arr_uint8):
     Image.fromarray(arr_uint8).save(path)
 
 
-def build_case(ct_path, label_path, out_dir, views=("lateral", "ap"), gamma=0.5):
+def build_case(ct_path, label_path, out_dir, views=("lateral", "ap"), gamma=0.5,
+               drop_ids=()):
     import nibabel as nib
     ct = nib.load(ct_path)
     vol, aff = np.asanyarray(ct.dataobj).astype(np.float32), ct.affine
     lab = np.asanyarray(nib.load(label_path).dataobj).astype(np.int16)
+    if drop_ids:                                          # e.g. exclude ribs (34-57) for now
+        lab[np.isin(lab, list(drop_ids))] = 0
     os.makedirs(out_dir, exist_ok=True)
     rows = []
     for view in views:
@@ -100,11 +103,15 @@ def main(argv=None):
     p.add_argument("--n_shards", type=int, default=1)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--no_resume", action="store_true")
+    p.add_argument("--no_ribs", action="store_true",
+                   help="exclude ribs (ids 34-57) from the masks -- ship spine+sacrum+femurs now,"
+                        " add ribs in a later version once rib numbering is finalised")
     a = p.parse_args(argv)
     if not a.in_dir and not (a.ct_dir and a.label_dir):
         p.error("give --in OR (--ct_dir and --label_dir)")
     os.makedirs(a.out_dir, exist_ok=True)
     views = tuple(a.views)
+    drop_ids = tuple(range(34, 58)) if a.no_ribs else ()   # 34-57 = rib_left/right_1..12
 
     cases = list(_pairs_split(a.ct_dir, a.label_dir) if a.ct_dir else _pairs(a.in_dir))
     if a.n_shards > 1:
@@ -118,7 +125,8 @@ def main(argv=None):
             n_skip += 1
             continue
         try:
-            rows = build_case(ct, lab, os.path.join(a.out_dir, case), views, a.gamma)
+            rows = build_case(ct, lab, os.path.join(a.out_dir, case), views, a.gamma,
+                              drop_ids=drop_ids)
         except Exception as exc:                              # one bad case must not kill the shard
             print(f"[{case}] FAILED: {str(exc)[:160]}")
             continue

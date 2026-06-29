@@ -45,6 +45,7 @@ ARGS=( -m xrsp.build_dataset
        --out "${OUT_DIR}" --views ${VIEWS} --gamma "${GAMMA}"
        --shard_id "${SHARD}" --n_shards "${N_SHARDS}" )
 [[ "${RESUME}" == "0" ]] && ARGS+=( --no_resume )
+[[ "${NO_RIBS:-0}" == "1" ]] && ARGS+=( --no_ribs )   # ship spine+sacrum+femurs now; ribs later
 
 echo "[gen_xrsp1k] shard ${SHARD}/${N_SHARDS}  v4=${CTSP1K_V4} -> ${OUT_DIR}  resume=${RESUME}  $(date)"
 "${PY}" "${ARGS[@]}"

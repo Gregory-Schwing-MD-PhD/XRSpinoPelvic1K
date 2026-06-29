@@ -29,7 +29,7 @@ mkdir -p logs
 echo "[ship_xrsp1k] (1) gen array %${N_SHARDS}  v4=${CTSP1K_V4} -> ${OUT_DIR}  resume=${RESUME}"
 JG=$(sbatch --parsable \
   --array=0-$((N_SHARDS - 1))%${N_SHARDS} \
-  --export=ALL,CTSP1K_V4=${CTSP1K_V4},OUT_DIR=${OUT_DIR},N_SHARDS=${N_SHARDS},RESUME=${RESUME},VIEWS=${VIEWS:-lateral ap} \
+  --export=ALL,CTSP1K_V4=${CTSP1K_V4},OUT_DIR=${OUT_DIR},N_SHARDS=${N_SHARDS},RESUME=${RESUME},VIEWS=${VIEWS:-lateral ap},NO_RIBS=${NO_RIBS:-0} \
   scripts/gen_xrsp1k.slurm)
 echo "GEN_ARRAY=${JG}"
 
