@@ -1,0 +1,5 @@
+# Shell/SLURM scripts run on Linux (the grid) — force LF so CRLF from a Windows
+# checkout never breaks them with $'\r': command not found.
+*.sh    text eol=lf
+*.slurm text eol=lf
+*.py    text eol=lf
