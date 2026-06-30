@@ -40,6 +40,13 @@ mkdir -p logs "${OUT_DIR}"
 [[ -d "${CTSP1K_V4}/ct" && -d "${CTSP1K_V4}/labels" ]] \
   || { echo "ERROR: ${CTSP1K_V4} must contain ct/ and labels/"; exit 1; }
 
+# preflight: fail FAST and loud if the render deps aren't in THIS python — otherwise
+# build_dataset catches the per-case ImportError and the shard "succeeds" with 0 written.
+"${PY}" -c "import numpy, nibabel, PIL" 2>/dev/null || {
+  echo "ERROR: render deps missing in $(${PY} -c 'import sys; print(sys.executable)')."
+  echo "       fix:  ${PY} -m pip install -e .   (installs numpy/nibabel/pillow), then re-submit."
+  exit 1; }
+
 ARGS=( -m xrsp.build_dataset
        --ct_dir "${CTSP1K_V4}/ct" --label_dir "${CTSP1K_V4}/labels"
        --out "${OUT_DIR}" --views ${VIEWS} --gamma "${GAMMA}"
