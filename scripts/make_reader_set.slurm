@@ -13,8 +13,8 @@
 # XRSpinoPelvic1K dataset and zip it for the radiology residents.
 #
 # Runs inside the SAME Singularity image as the other XRSpinoPelvic1K / CTSpinoPelvic1K
-# slurms (containers/ctspinopelvic1k.sif) — numpy/PIL live in the image, xrsp not needed
-# here; the repo is bound only so scripts/make_reader_set.py is on disk.
+# slurms (containers/ctspinopelvic1k.sif), via the SAME env (configs/default.env) — numpy/PIL
+# live in the image, xrsp not needed here; the repo is bound only so the script is on disk.
 #
 # Produces:  <OUT>/R01..RN/lateral_drr.png (+ ap)     <- send this
 #            <OUT>/reader_measurements_template.csv   <- reader fills
@@ -28,15 +28,12 @@
 set -euo pipefail
 REPO_ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 cd "${REPO_ROOT}"
+source configs/default.env       # CTSP1K-identical singularity env (conda PATH + scratch) + SIF_PATH
 
 DATASET="${DATASET:-${REPO_ROOT}/data/xrsp1k}"
 OUT="${OUT:-${REPO_ROOT}/reader_set}"
 N="${N:-25}"
 SEED="${SEED:-20260630}"
-
-# Same Singularity image as the CTSpinoPelvic1K slurms (containers/ctspinopelvic1k.sif).
-CTSP1K_ROOT="${CTSP1K_ROOT:-${HOME}/CTSpinoPelvic1K}"
-SIF_PATH="${SIF_PATH:-${CTSP1K_ROOT}/containers/ctspinopelvic1k.sif}"
 
 mkdir -p logs
 [[ -f "${SIF_PATH}" ]] || { echo "ERROR: no container at ${SIF_PATH}"; \

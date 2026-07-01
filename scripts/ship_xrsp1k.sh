@@ -27,9 +27,8 @@ N_SHARDS="${N_SHARDS:-16}"
 OUT_DIR="${OUT_DIR:-${ROOT}/data/xrsp1k}"
 RESUME="${RESUME:-1}"
 
-# Same Singularity image as the CTSpinoPelvic1K slurms (containers/ctspinopelvic1k.sif).
-CTSP1K_ROOT="${CTSP1K_ROOT:-${HOME}/CTSpinoPelvic1K}"
-SIF_PATH="${SIF_PATH:-${CTSP1K_ROOT}/containers/ctspinopelvic1k.sif}"
+# CTSP1K-identical singularity env (conda PATH + scratch) + SIF_PATH.
+source configs/default.env
 [[ -f "${SIF_PATH}" ]] || { echo "ERROR: no container at ${SIF_PATH}"; \
   echo "       set SIF_PATH=/path/to/ctspinopelvic1k.sif (or CTSP1K_ROOT=/path/to/CTSpinoPelvic1K)"; exit 1; }
 mkdir -p logs
@@ -46,7 +45,7 @@ echo "GEN_ARRAY=${JG}"
 # and the output tree; OUT_DIR is bound explicitly only when it lives outside the repo.
 UP_BINDS="${ROOT}:${ROOT}"
 case "${OUT_DIR}" in "${ROOT}"/*) : ;; *) UP_BINDS="${UP_BINDS},${OUT_DIR}:${OUT_DIR}" ;; esac
-UP_CMD="stdbuf -oL -eL singularity exec --env PYTHONPATH=${ROOT},PYTHONUNBUFFERED=1,HF_TOKEN=${HF_TOKEN} --bind ${UP_BINDS} --pwd ${ROOT} ${SIF_PATH} python3 -u scripts/upload_xrsp1k.py --out_dir ${OUT_DIR} --repo_id ${REPO_ID} --revision ${REV}"
+UP_CMD="cd ${ROOT} && source configs/default.env && stdbuf -oL -eL singularity exec --env PYTHONPATH=${ROOT},PYTHONUNBUFFERED=1,HF_TOKEN=${HF_TOKEN} --bind ${UP_BINDS} --pwd ${ROOT} ${SIF_PATH} python3 -u scripts/upload_xrsp1k.py --out_dir ${OUT_DIR} --repo_id ${REPO_ID} --revision ${REV}"
 
 echo "[ship_xrsp1k] (2) upload -> ${REPO_ID}@${REV}  after all ${N_SHARDS} shards of ${JG}"
 JU=$(sbatch --parsable -q primary --dependency=afterok:${JG} \

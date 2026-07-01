@@ -17,13 +17,14 @@
 # (.json). Pure-Python (numpy/nibabel/Pillow), no GPU.
 #
 # Runs inside the SAME Singularity image the CTSpinoPelvic1K slurms use
-# (containers/ctspinopelvic1k.sif) — those deps live in the image, so there is NO
+# (containers/ctspinopelvic1k.sif), via the SAME env (configs/default.env: conda-provided
+# singularity on PATH + node-local scratch). Those deps live in the image, so there is NO
 # `pip install` here; xrsp is made importable by binding this repo onto PYTHONPATH.
 #
 # REQUIRES: the ctspinopelvic1k.sif container, and the v4 tree present locally.
 # Point the container path via CTSP1K_ROOT (your CTSpinoPelvic1K checkout) or SIF_PATH.
 #
-#   CTSP1K_V4=/path/to/hf_export_v4 CTSP1K_ROOT=~/CTSpinoPelvic1K sbatch scripts/gen_xrsp1k.slurm
+#   CTSP1K_V4=~/CTSpinoPelvic1K/data/hf_export_v4 sbatch scripts/gen_xrsp1k.slurm
 #   SIF_PATH=/path/to/ctspinopelvic1k.sif CTSP1K_V4=... sbatch scripts/gen_xrsp1k.slurm
 #   N_SHARDS=16 CTSP1K_V4=... OUT_DIR=... RESUME=0 sbatch scripts/gen_xrsp1k.slurm
 # Keep the array width (0-15%16) in sync with N_SHARDS.
@@ -31,6 +32,7 @@
 set -euo pipefail
 REPO_ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
 cd "${REPO_ROOT}"
+source configs/default.env       # CTSP1K-identical singularity env (conda PATH + scratch) + SIF_PATH
 
 CTSP1K_V4="${CTSP1K_V4:?set CTSP1K_V4=/path/to/hf_export_v4 (the v4 tree with ct/ and labels/)}"
 OUT_DIR="${OUT_DIR:-${REPO_ROOT}/data/xrsp1k}"
@@ -40,20 +42,11 @@ N_SHARDS="${N_SHARDS:-16}"
 SHARD="${SLURM_ARRAY_TASK_ID:-0}"
 RESUME="${RESUME:-1}"           # RESUME=0 -> --no_resume (re-render ALL; use after v4 is final)
 
-# Singularity container — the SAME image as the CTSpinoPelvic1K slurms. Default to the
-# containers/ dir of a sibling CTSpinoPelvic1K checkout; override with SIF_PATH directly.
-CTSP1K_ROOT="${CTSP1K_ROOT:-${HOME}/CTSpinoPelvic1K}"
-SIF_PATH="${SIF_PATH:-${CTSP1K_ROOT}/containers/ctspinopelvic1k.sif}"
-
 mkdir -p logs "${OUT_DIR}"
 [[ -f "${SIF_PATH}" ]] || { echo "ERROR: no container at ${SIF_PATH}"; \
   echo "       set SIF_PATH=/path/to/ctspinopelvic1k.sif (or CTSP1K_ROOT=/path/to/CTSpinoPelvic1K)"; exit 1; }
 [[ -d "${CTSP1K_V4}/ct" && -d "${CTSP1K_V4}/labels" ]] \
   || { echo "ERROR: ${CTSP1K_V4} must contain ct/ and labels/"; exit 1; }
-
-export SINGULARITY_TMPDIR="/tmp/${USER}_xrsp1k_${SLURM_JOB_ID:-$$}"
-mkdir -p "${SINGULARITY_TMPDIR}"
-trap 'rm -rf "${SINGULARITY_TMPDIR}"' EXIT
 
 # Identity binds: this repo (so `import xrsp` works via PYTHONPATH), the v4 input tree,
 # and the output dir (only if it lives outside the repo, to avoid a redundant bind).
