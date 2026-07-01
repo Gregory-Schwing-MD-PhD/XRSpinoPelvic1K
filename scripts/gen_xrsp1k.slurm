@@ -14,12 +14,17 @@
 #
 # Reads the v4 tree (ct/ + labels/, VerSe-native ids 1-57) and writes, per case,
 # paired DRR (.npy + .png), dense multi-class mask (.png), and per-level landmarks
-# (.json). Pure-Python (numpy/nibabel/Pillow) — no GPU, no container.
+# (.json). Pure-Python (numpy/nibabel/Pillow), no GPU.
 #
-# REQUIRES: the xrsp package importable (pip install -e . in this repo, or
-# PYTHONPATH=<repo>), and the v4 tree present locally.
+# Runs inside the SAME Singularity image the CTSpinoPelvic1K slurms use
+# (containers/ctspinopelvic1k.sif) — those deps live in the image, so there is NO
+# `pip install` here; xrsp is made importable by binding this repo onto PYTHONPATH.
 #
-#   CTSP1K_V4=/path/to/hf_export_v4 sbatch scripts/gen_xrsp1k.slurm
+# REQUIRES: the ctspinopelvic1k.sif container, and the v4 tree present locally.
+# Point the container path via CTSP1K_ROOT (your CTSpinoPelvic1K checkout) or SIF_PATH.
+#
+#   CTSP1K_V4=/path/to/hf_export_v4 CTSP1K_ROOT=~/CTSpinoPelvic1K sbatch scripts/gen_xrsp1k.slurm
+#   SIF_PATH=/path/to/ctspinopelvic1k.sif CTSP1K_V4=... sbatch scripts/gen_xrsp1k.slurm
 #   N_SHARDS=16 CTSP1K_V4=... OUT_DIR=... RESUME=0 sbatch scripts/gen_xrsp1k.slurm
 # Keep the array width (0-15%16) in sync with N_SHARDS.
 # =============================================================================
@@ -33,32 +38,28 @@ VIEWS="${VIEWS:-lateral ap}"
 GAMMA="${GAMMA:-0.5}"
 N_SHARDS="${N_SHARDS:-16}"
 SHARD="${SLURM_ARRAY_TASK_ID:-0}"
-PY="${PY:-python}"
-SIF="${SIF:-}"                  # optional singularity image WITH numpy/nibabel/Pillow, e.g.
-                               #   SIF=~/CTSpinoPelvic1K/containers/ctspinopelvic1k.sif sbatch ...
 RESUME="${RESUME:-1}"           # RESUME=0 -> --no_resume (re-render ALL; use after v4 is final)
 
+# Singularity container — the SAME image as the CTSpinoPelvic1K slurms. Default to the
+# containers/ dir of a sibling CTSpinoPelvic1K checkout; override with SIF_PATH directly.
+CTSP1K_ROOT="${CTSP1K_ROOT:-${HOME}/CTSpinoPelvic1K}"
+SIF_PATH="${SIF_PATH:-${CTSP1K_ROOT}/containers/ctspinopelvic1k.sif}"
+
 mkdir -p logs "${OUT_DIR}"
+[[ -f "${SIF_PATH}" ]] || { echo "ERROR: no container at ${SIF_PATH}"; \
+  echo "       set SIF_PATH=/path/to/ctspinopelvic1k.sif (or CTSP1K_ROOT=/path/to/CTSpinoPelvic1K)"; exit 1; }
 [[ -d "${CTSP1K_V4}/ct" && -d "${CTSP1K_V4}/labels" ]] \
   || { echo "ERROR: ${CTSP1K_V4} must contain ct/ and labels/"; exit 1; }
 
-# Runner: bare python, OR inside a singularity image (binds repo + data + out). xrsp is made
-# importable via PYTHONPATH=repo, so the container needs only numpy/nibabel/Pillow — no pip.
-if [[ -n "${SIF}" ]]; then
-  RUN=( singularity exec
-        --bind "${REPO_ROOT}:${REPO_ROOT},${CTSP1K_V4}:${CTSP1K_V4},${OUT_DIR}:${OUT_DIR}"
-        --pwd "${REPO_ROOT}" --env "PYTHONPATH=${REPO_ROOT}" "${SIF}" python3 )
-  echo "[gen_xrsp1k] runner: singularity exec ${SIF}"
-else
-  RUN=( "${PY}" )
-fi
+export SINGULARITY_TMPDIR="/tmp/${USER}_xrsp1k_${SLURM_JOB_ID:-$$}"
+mkdir -p "${SINGULARITY_TMPDIR}"
+trap 'rm -rf "${SINGULARITY_TMPDIR}"' EXIT
 
-# preflight: fail FAST and loud if the render deps aren't in the runner — otherwise
-# build_dataset catches the per-case ImportError and the shard "succeeds" with 0 written.
-"${RUN[@]}" -c "import numpy, nibabel, PIL" 2>/dev/null || {
-  echo "ERROR: render deps (numpy/nibabel/PIL) missing in the runner."
-  echo "       bare python -> ${PY} -m pip install -e .  ; or pass SIF=/path/to/image.sif"
-  exit 1; }
+# Identity binds: this repo (so `import xrsp` works via PYTHONPATH), the v4 input tree,
+# and the output dir (only if it lives outside the repo, to avoid a redundant bind).
+BINDS="${REPO_ROOT}:${REPO_ROOT},${CTSP1K_V4}:${CTSP1K_V4}"
+case "${OUT_DIR}" in "${REPO_ROOT}"/*) : ;; *) BINDS="${BINDS},${OUT_DIR}:${OUT_DIR}" ;; esac
+ENV_VARS="PYTHONPATH=${REPO_ROOT},PYTHONUNBUFFERED=1"
 
 ARGS=( -m xrsp.build_dataset
        --ct_dir "${CTSP1K_V4}/ct" --label_dir "${CTSP1K_V4}/labels"
@@ -67,6 +68,20 @@ ARGS=( -m xrsp.build_dataset
 [[ "${RESUME}" == "0" ]] && ARGS+=( --no_resume )
 [[ "${NO_RIBS:-0}" == "1" ]] && ARGS+=( --no_ribs )   # ship spine+sacrum+femurs now; ribs later
 
-echo "[gen_xrsp1k] shard ${SHARD}/${N_SHARDS}  v4=${CTSP1K_V4} -> ${OUT_DIR}  resume=${RESUME}  $(date)"
-"${RUN[@]}" "${ARGS[@]}"
+echo "[gen_xrsp1k] shard ${SHARD}/${N_SHARDS}  sif=${SIF_PATH}"
+echo "[gen_xrsp1k]   v4=${CTSP1K_V4} -> ${OUT_DIR}  resume=${RESUME}  $(date)"
+
+# preflight inside the container: fail FAST and loud if the render deps / xrsp aren't
+# importable — otherwise build_dataset swallows the per-case ImportError and the shard
+# "succeeds" with 0 files written.
+stdbuf -oL -eL singularity exec \
+    --env "${ENV_VARS}" --bind "${BINDS}" --pwd "${REPO_ROOT}" "${SIF_PATH}" \
+    python3 -c "import numpy, nibabel, PIL, xrsp; print('deps + xrsp OK')" || {
+      echo "ERROR: numpy/nibabel/PIL or xrsp not importable inside ${SIF_PATH}."; exit 1; }
+
+# shellcheck disable=SC2086
+stdbuf -oL -eL singularity exec \
+    --env "${ENV_VARS}" --bind "${BINDS}" --pwd "${REPO_ROOT}" "${SIF_PATH}" \
+    python3 -u "${ARGS[@]}"
+
 echo "[gen_xrsp1k] shard ${SHARD} done  $(date)"
