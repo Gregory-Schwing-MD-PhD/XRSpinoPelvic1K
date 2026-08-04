@@ -47,6 +47,19 @@ CORNER_LEVELS = tuple([f"C{i}" for i in range(1, 8)] + [f"T{i}" for i in range(1
 # and the blob separation is a free obliquity estimate. PI/PT need exactly this point.
 FEMORAL_LABELS = ("femur_left", "femur_right")
 
+# A level must be substantially IN the field of view before its endplate corners mean
+# anything. A vertebra clipped by the scan edge still yields four geometrically valid
+# corners -- they sit on the fragment -- but the "endplate" of a sliver is not an
+# endplate, and supervising on it teaches the model to put corners on partial bodies.
+# Seen on case 0003: T12 survived as 447 voxels (3% of a real body, 120 px projected)
+# against L1-S1 at 15k-24k, and its corners rendered as a floating pair above the spine.
+#
+# Both a floor and a relative test, because absolute voxel counts scale with resolution:
+# a level is kept if it clears MIN_LEVEL_VOXELS *and* MIN_LEVEL_FRACTION of the median
+# labelled vertebra in that same scan.
+MIN_LEVEL_VOXELS = 3000
+MIN_LEVEL_FRACTION = 0.35
+
 
 def _overmask_anchor_px(lab, aff, plan, level_name):
     """ostk's over-mask endplate anchor, projected to detector pixels. Kept as an
@@ -138,10 +151,19 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
         # FOUR corners per level (both endplates) -- the standard vertebral annotation
         # on spine radiographs, so this is directly comparable to corner-annotated real
         # datasets, and it gives every segmental disc angle for free.
+        # median labelled-vertebra size in THIS scan, for the relative FOV test
+        _sizes = [int((lab == LABELS[n]).sum()) for n in CORNER_LEVELS
+                  if LABELS.get(n) is not None and (lab == LABELS[n]).any()]
+        _med = float(np.median(_sizes)) if _sizes else 0.0
         corners = {}
+        skipped = []
         for name in CORNER_LEVELS:
             lid = LABELS.get(name)
             if lid is None or not (lab == lid).any():
+                continue
+            n_vox = int((lab == lid).sum())
+            if n_vox < MIN_LEVEL_VOXELS or (_med and n_vox < MIN_LEVEL_FRACTION * _med):
+                skipped.append((name, n_vox))       # FOV-truncated: not an endplate
                 continue
             try:
                 c4 = vertebra_corners_2d(lab, aff, plan, lid, level_name=name,
@@ -170,6 +192,7 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
                    "yaw_deg": v["yaw_deg"], "pitch_deg": v["pitch_deg"],
                    "roll_deg": v["roll_deg"], "endplate_corners": corners,
                    "bicoxofemoral_px": fem_px,
+                   "skipped_truncated": {n: v for n, v in skipped},
                    "pi_anchor_mode": pi_anchor,
                    "pi_anchor_px": (pi_anchor_2d(corners["S1"], mode=pi_anchor)
                                     if "S1" in corners else None),
@@ -177,6 +200,7 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
                                      for c in corners.values()) + (1 if fem_px else 0)},
                   open(os.path.join(out_dir, f"{tag}_corners.json"), "w"), indent=2)
         rows.append({"view": tag, "n_corner_levels": len(corners),
+                     "skipped_truncated": ";".join(f"{n}:{v}" for n, v in skipped) or "",
                      "has_bicox": int(fem_px is not None),
                      "yaw_deg": round(v["yaw_deg"], 2), "pitch_deg": round(v["pitch_deg"], 2),
                      "roll_deg": round(v["roll_deg"], 2),
@@ -317,6 +341,7 @@ def main(argv=None):
         suf = "" if a.n_shards == 1 else f"_shard{a.shard_id}"
         with open(os.path.join(a.out_dir, f"manifest{suf}.csv"), "w", newline="") as f:
             cols = ["case", "view", "n_levels", "n_corner_levels", "has_bicox",
+                    "skipped_truncated",
                     "yaw_deg", "pitch_deg", "roll_deg", "drr"]
             w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
             w.writeheader()
