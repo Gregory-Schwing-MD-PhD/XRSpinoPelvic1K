@@ -55,7 +55,11 @@ RUN pip install --no-cache-dir "wandb>=0.12.10"
 # the sacral ala) and then projected. Fitting them from the 2-D silhouette instead
 # is 26–32° wrong at every slab fraction, because the ala superimposes on the S1
 # body in projection. This dependency is therefore load-bearing, not convenience.
-ARG OSTK_REF=main
+# Pin for anything you intend to publish -- the 3-D endplate fit determines every label.
+# 09dd9c5 is the first commit where main carries ostk.drr + ostk.project2d (PR #5 merged)
+# AND the shared spine.pi_anchor_point, so the corner-midpoint PI convention is the
+# default and CT- and XR-derived PI agree.
+ARG OSTK_REF=09dd9c5
 RUN pip install --no-cache-dir \
         "git+https://github.com/Gregory-Schwing-MD-PhD/OpenSpineToolkit.git@${OSTK_REF}"
 

@@ -14,8 +14,9 @@ edit→run loop short and makes the image a stable, citable artefact.
 ```bash
 docker login
 make image                       # -> gregoryschwingmdphd/xrspinopelvic:latest
-# or pin the OpenSpineToolkit commit the labels depend on:
-OSTK_REF=1174c02 make image
+# OSTK_REF defaults to 09dd9c5 -- the first main commit carrying ostk.drr +
+# ostk.project2d (PR #5) and the shared PI anchor. Override to move it:
+OSTK_REF=<sha> make image
 ```
 
 `OSTK_REF` matters. Endplate corners are fitted in 3-D by
