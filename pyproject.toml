@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xrsp"
-version = "0.1.0"
+version = "1.0.0"
 description = "XRSpinoPelvic1K — open spinal-radiograph (DRR) dataset + real-time vertebral-level localization, generated from segmented CT."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -16,10 +16,23 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
-dependencies = ["numpy>=1.21", "nibabel>=4.0", "pillow>=9.0"]
+dependencies = ["numpy>=1.21", "nibabel>=4.0", "pillow>=9.0", "scipy>=1.9"]
 
 [project.optional-dependencies]
-train = ["torch>=2.0"]
+# The model stack is off-the-shelf on purpose: MONAI supplies the network, Lightning
+# the loop. The bespoke code is the masked loss (partial landmark annotation) and the
+# angle metrics -- the science, not the plumbing. Versions here match docker/Dockerfile;
+# the container is the reproducible artefact, this is for local development.
+train = [
+    "torch>=2.0",
+    "monai>=1.4.0",
+    "pytorch-lightning>=2.4.0",
+    "torchmetrics>=1.4.0",
+]
+# The 3-D endplate fit the labels come from. Load-bearing: fitting the endplate from
+# the 2-D silhouette instead is 26-32 deg wrong, because the ala superimposes on the
+# S1 body in projection.
+ostk = ["ostk @ git+https://github.com/Gregory-Schwing-MD-PhD/OpenSpineToolkit.git"]
 dev = ["pytest>=7.0"]
 
 [project.urls]
@@ -27,6 +40,7 @@ Homepage = "https://github.com/Gregory-Schwing-MD-PhD/XRSpinoPelvic1K"
 
 [project.scripts]
 xrsp-build = "xrsp.build_dataset:main"
+xrsp-splits = "scripts.make_splits:main"
 
 [tool.setuptools.packages.find]
 include = ["xrsp*"]

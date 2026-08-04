@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+title: >-
+  XRSpinoPelvic1K: amodal vertebral endplate landmarks on lateral
+  radiographs, learned from 3-D CT
+message: If you use this software or dataset, please cite it.
+type: software
+authors:
+  - family-names: Schwing
+    given-names: Gregory
+    affiliation: Wayne State University
+    orcid: https://orcid.org/0000-0000-0000-0000
+repository-code: https://github.com/Gregory-Schwing-MD-PhD/XRSpinoPelvic1K
+license: Apache-2.0
+version: 1.0.0
+keywords:
+  - spine
+  - radiograph
+  - digitally reconstructed radiograph
+  - spinopelvic parameters
+  - pelvic incidence
+  - amodal segmentation
+  - landmark localization
+abstract: >-
+  On a lateral spinal radiograph the sacral ala superimposes on the S1 vertebral
+  body, so the S1 endplate cannot be recovered from what is visible: fitting it
+  from the projected silhouette is 26-32 degrees in error at every slab fraction
+  tested, because the medial-lateral coordinate that separates ala from body does
+  not survive projection. XRSpinoPelvic1K renders digitally reconstructed
+  radiographs from segmented CT at randomised oblique angles and projects the
+  ground truth through the identical geometry, yielding amodal vertebral corner
+  landmarks -- the true extent of each endplate, including the part occluded on a
+  real film. Endplates fitted in 3-D and projected reproduce sacral slope and
+  lumbar lordosis to under one degree. Published manual inter-rater reliability
+  for the sacral endplate is as low as ICC 0.41, attributed to the same overlap,
+  making human agreement rather than a segmentation benchmark the meaningful
+  comparison.
