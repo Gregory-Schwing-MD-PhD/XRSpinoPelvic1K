@@ -33,6 +33,123 @@ def _save_png(path, arr_uint8):
     Image.fromarray(arr_uint8).save(path)
 
 
+# EVERY vertebra ostk knows, cranial->caudal. Emitting corners for all present levels
+# is nearly free at generation time (the 3-D fit runs per level anyway) and cheap at
+# training time (a few more heatmap channels, masked where a level is absent). It buys
+# segmental lordosis and Cobb angles, and the extra landmarks act as auxiliary
+# supervision. Levels missing from a scan are simply omitted from that view's json.
+CORNER_LEVELS = tuple([f"C{i}" for i in range(1, 8)] + [f"T{i}" for i in range(1, 14)]
+                      + [f"L{i}" for i in range(1, 7)] + ["S1"])
+# Femoral heads share ONE channel on purpose. On a lateral you cannot tell which head is
+# which -- on a true lateral they superimpose entirely -- so a left/right split is
+# ill-posed. One channel holding both, with the BICOXOFEMORAL point taken as the centroid
+# of the detected blobs, handles superimposed (one blob) and oblique (two) identically,
+# and the blob separation is a free obliquity estimate. PI/PT need exactly this point.
+FEMORAL_LABELS = ("femur_left", "femur_right")
+
+
+def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma=0.55,
+                       pixel_spacing_mm=1.0, yaw_deg=12.0, pitch_deg=8.0, roll_deg=6.0,
+                       drop_ids=(), ostk_path=None):
+    """N randomly-oblique lateral views of one CT, each with labels + endplate corners
+    projected through the SAME geometry.
+
+    Perfect laterals do not occur clinically, and the obliquity is what changes how the
+    sacral ala superimposes on the S1 body -- the structure the model has to see through.
+    Measured on case 0003, the PROJECTED S1 endplate inclination moves 28.8 -> 33.2 deg
+    across yaw -12..+12, so positioning alone is a ~4 deg SS error source; the model has
+    to learn that, which means it has to be trained on it.
+
+    Corners come from the 3-D fit, projected (see oblique.endplate_corners_2d) -- never
+    from the 2-D silhouette, which is 26-32 deg wrong because the ala is superimposed.
+    """
+    import nibabel as nib
+    from .oblique import (endplate_corners_2d, oblique_plan, project_footprints,
+                          render, sample_view)
+    try:
+        from ostk.labels import LABELS
+    except Exception:                                     # noqa: BLE001
+        LABELS = {}
+    rng = np.random.default_rng(seed)
+    ct = nib.load(ct_path)
+    vol, aff = np.asanyarray(ct.dataobj).astype(np.float32), ct.affine
+    lab = np.asanyarray(nib.load(label_path).dataobj).astype(np.int16)
+    if drop_ids:
+        lab[np.isin(lab, list(drop_ids))] = 0
+    os.makedirs(out_dir, exist_ok=True)
+    idx = np.array(np.nonzero(lab)).T
+    if not len(idx):
+        return []
+    bounds = (np.c_[idx, np.ones(len(idx))] @ np.asarray(aff, float).T)[:, :3]
+    rows = []
+    for k in range(n_views):
+        v = sample_view(rng, yaw_deg=(0.0 if k == 0 else yaw_deg),   # view 0 = true lateral
+                        pitch_deg=(0.0 if k == 0 else pitch_deg),
+                        roll_deg=(0.0 if k == 0 else roll_deg))
+        plan = oblique_plan(aff, v["direction"], v["sup"], roll_deg=v["roll_deg"],
+                            bounds_world=bounds, pixel_spacing_mm=pixel_spacing_mm)
+        drr = render(vol, aff, plan, gamma=gamma)
+        fps = project_footprints(lab, aff, plan)
+        # Bicoxofemoral point: femoral-head CENTRES fitted in 3-D, then projected.
+        # NOT the centroid of the femur footprint -- `femur_left/right` covers the whole
+        # proximal femur including shaft and trochanter, so its centroid sits well below
+        # and lateral to the head. Using it put PT 6.8 deg and PI 6.2 deg out while SS and
+        # LL stayed at 0.6 deg, and SS+PT=PI still held exactly -- i.e. the geometry was
+        # fine and only this point was wrong. ostk fits a sphere to the superior slab of
+        # each femur; do that, then project, exactly as for the endplate corners.
+        fem_px = None
+        heads_world = []
+        try:
+            from ostk.metrics import femoral_head_center
+            for fem, hip in (("femur_left", "left_hip"), ("femur_right", "right_hip")):
+                res = femoral_head_center(lab, aff, fem, hip)
+                # returns (centre_xyz, radius_mm, rms) -- take the centre only
+                if res is not None and len(res):
+                    heads_world.append(np.asarray(res[0], float))
+        except Exception:                                     # noqa: BLE001
+            heads_world = []
+        if heads_world:
+            right3 = np.asarray(plan["right"], float)
+            up3 = np.asarray(plan["up"], float)
+            sp3 = plan["pixel_spacing_mm"]
+            Hh = plan["shape"][0]
+            px = [[(c @ right3 - plan["u0"]) / sp3 - 0.5,
+                   (Hh - 1) - ((c @ up3 - plan["v0"]) / sp3 - 0.5)] for c in heads_world]
+            fem_px = [float(np.mean([q[0] for q in px])),
+                      float(np.mean([q[1] for q in px]))]
+        corners = {}
+        for name in CORNER_LEVELS:
+            lid = LABELS.get(name)
+            if lid is None or not (lab == lid).any():
+                continue
+            try:
+                c = endplate_corners_2d(lab, aff, plan, lid, level_name=name,
+                                        ostk_path=ostk_path)
+            except Exception:                             # noqa: BLE001
+                c = None
+            if c is not None:
+                corners[name] = {"anterior": [float(x) for x in c[0]],
+                                 "posterior": [float(x) for x in c[1]]}
+        tag = f"lat{k:02d}"
+        _save_png(os.path.join(out_dir, f"{tag}_drr.png"), to_uint8(drr))
+        np.save(os.path.join(out_dir, f"{tag}_drr.npy"), drr.astype(np.float32))
+        mask = footprints_to_mask(fps)
+        if mask is not None:
+            _save_png(os.path.join(out_dir, f"{tag}_mask.png"), mask.astype(np.uint8))
+        json.dump({"view": tag, "geometry": plan, "shape": list(drr.shape),
+                   "yaw_deg": v["yaw_deg"], "pitch_deg": v["pitch_deg"],
+                   "roll_deg": v["roll_deg"], "endplate_corners": corners,
+                   "bicoxofemoral_px": fem_px,
+                   "n_channels": 2 * len(corners) + (1 if fem_px else 0)},
+                  open(os.path.join(out_dir, f"{tag}_corners.json"), "w"), indent=2)
+        rows.append({"view": tag, "n_corner_levels": len(corners),
+                     "has_bicox": int(fem_px is not None),
+                     "yaw_deg": round(v["yaw_deg"], 2), "pitch_deg": round(v["pitch_deg"], 2),
+                     "roll_deg": round(v["roll_deg"], 2),
+                     "drr": os.path.join(out_dir, f"{tag}_drr.png")})
+    return rows
+
+
 def build_case(ct_path, label_path, out_dir, views=("lateral", "ap"), gamma=0.5,
                drop_ids=()):
     import nibabel as nib
@@ -103,6 +220,16 @@ def main(argv=None):
     p.add_argument("--n_shards", type=int, default=1)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--no_resume", action="store_true")
+    p.add_argument("--oblique", type=int, default=0, metavar="N",
+                   help="generate N randomly-oblique lateral views per CT (view 0 is a "
+                        "true lateral). Replaces --views. Labels + endplate corners are "
+                        "projected through the same geometry, so they stay exact.")
+    p.add_argument("--yaw_deg", type=float, default=12.0)
+    p.add_argument("--pitch_deg", type=float, default=8.0)
+    p.add_argument("--roll_deg", type=float, default=6.0)
+    p.add_argument("--pixel_spacing_mm", type=float, default=1.0)
+    p.add_argument("--ostk_path", default=None,
+                   help="path to an OpenSpineToolkit checkout (needed for endplate corners)")
     p.add_argument("--no_ribs", action="store_true",
                    help="exclude ribs (ids 34-57) from the masks -- ship spine+sacrum+femurs now,"
                         " add ribs in a later version once rib numbering is finalised")
@@ -125,8 +252,16 @@ def main(argv=None):
             n_skip += 1
             continue
         try:
-            rows = build_case(ct, lab, os.path.join(a.out_dir, case), views, a.gamma,
-                              drop_ids=drop_ids)
+            if a.oblique:
+                rows = build_case_oblique(
+                    ct, lab, os.path.join(a.out_dir, case), n_views=a.oblique,
+                    seed=abs(hash(case)) % (2 ** 31),   # per-case seed: reproducible views
+                    gamma=a.gamma, pixel_spacing_mm=a.pixel_spacing_mm,
+                    yaw_deg=a.yaw_deg, pitch_deg=a.pitch_deg, roll_deg=a.roll_deg,
+                    drop_ids=drop_ids, ostk_path=a.ostk_path)
+            else:
+                rows = build_case(ct, lab, os.path.join(a.out_dir, case), views, a.gamma,
+                                  drop_ids=drop_ids)
         except Exception as exc:                              # one bad case must not kill the shard
             print(f"[{case}] FAILED: {str(exc)[:160]}")
             continue
@@ -140,7 +275,9 @@ def main(argv=None):
         # per-shard manifest (merge after the array finishes) to avoid clobbering
         suf = "" if a.n_shards == 1 else f"_shard{a.shard_id}"
         with open(os.path.join(a.out_dir, f"manifest{suf}.csv"), "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=["case", "view", "n_levels", "drr"])
+            cols = ["case", "view", "n_levels", "n_corner_levels", "has_bicox",
+                    "yaw_deg", "pitch_deg", "roll_deg", "drr"]
+            w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
             w.writeheader()
             w.writerows(man)
     print(f"shard {a.shard_id}/{a.n_shards}: wrote {n_done} case(s), skipped {n_skip} -> {a.out_dir}")
