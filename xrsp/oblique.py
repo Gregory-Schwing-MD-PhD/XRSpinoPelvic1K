@@ -183,7 +183,8 @@ def project_footprints(label, affine, plan, ids: Optional[Iterable[int]] = None
 
 def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
                         which: str = "superior", min_voxels: int = 50,
-                        ostk_path: str = None, corner_params: dict = None):
+                        ostk_path: str = None, corner_params: dict = None,
+                        anatomic: bool = True):
     """The two 2-D corners of one vertebra's endplate: FIT IN 3-D, then projected.
 
     Delegates the fit to ostk (spine.endplate_from_label / corner_params_for_level),
@@ -203,7 +204,8 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     if ostk_path and ostk_path not in sys.path:
         sys.path.insert(0, ostk_path)
     try:
-        from ostk.spine import endplate_corners, corner_params_for_level
+        from ostk.spine import (endplate_corners, endplate_corners_anatomic,
+                                corner_params_for_level)
         from ostk.labels import LABELS
         from ostk.masks import binary_mask, largest_component, mask_world
     except Exception as exc:                                   # noqa: BLE001
@@ -222,7 +224,13 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     _params = dict(corner_params) if corner_params is not None else         dict(corner_params_for_level(name))
     kw = {k: v for k, v in _params.items()
           if k in endplate_corners.__code__.co_varnames}
-    res = endplate_corners(pts, normal_axis=up3, which=which, lr=d, **kw)
+    # ANATOMIC corners for annotation: same fitted line, anterior end run out to the
+    # cortical margin (ostk's `ant_skip` deliberately holds it 6-14 mm inside, which is
+    # right for a Cobb line and wrong for a label). The corner slides ALONG the fitted
+    # line, so the direction -- hence every angle -- is unchanged; see the function's
+    # docstring for the two approaches that failed before this one.
+    fn = endplate_corners_anatomic if anatomic else endplate_corners
+    res = fn(pts, normal_axis=up3, which=which, lr=d, **kw)
     if res is None:
         return None
     p_lo, p_hi = np.asarray(res[0], float), np.asarray(res[1], float)
