@@ -226,3 +226,72 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
                          (H - 1) - ((P @ up - plan["v0"]) / sp - 0.5)])
     a_px, b_px = to_px(p_lo), to_px(p_hi)
     return (a_px, b_px) if a_px[0] <= b_px[0] else (b_px, a_px)
+
+
+# ── 4-corner vertebral annotation ────────────────────────────────────────────────
+
+CORNER_KEYS = ("sup_ant", "sup_post", "inf_ant", "inf_post")
+
+
+def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
+                        min_voxels: int = 50, ostk_path: str = None):
+    """All FOUR corners of one vertebra -- both endplates -- in detector pixels.
+
+        sup_ant  ---- sup_post      superior endplate
+           |             |
+        inf_ant  ---- inf_post      inferior endplate
+
+    Four corners per level is the standard vertebral annotation on spine radiographs
+    (and what corner-annotated real datasets such as BUU provide), so a model trained
+    on these is directly comparable to real ground truth without a conversion step.
+    It also gives every SEGMENTAL angle for free: the disc space at L4/5 is the angle
+    between L4's inferior endplate and L5's superior endplate.
+
+    Each endplate is fitted in 3-D and then projected -- never fitted from the 2-D
+    silhouette, which is 26-32 deg wrong because the ala superimposes on the body.
+
+    Returns {"sup_ant": [x, y], ...} or None.
+    """
+    out = {}
+    for which, keys in (("superior", ("sup_ant", "sup_post")),
+                        ("inferior", ("inf_ant", "inf_post"))):
+        try:
+            c = endplate_corners_2d(label, affine, plan, level_id, level_name=level_name,
+                                    which=which, min_voxels=min_voxels,
+                                    ostk_path=ostk_path)
+        except Exception:                                       # noqa: BLE001
+            c = None
+        if c is None:
+            continue
+        out[keys[0]] = [float(x) for x in c[0]]
+        out[keys[1]] = [float(x) for x in c[1]]
+    return out or None
+
+
+def pi_anchor_2d(corners: dict, *, mode: str = "corner"):
+    """The S1 point PI/PT are measured from, in detector pixels.
+
+    mode="corner"   (DEFAULT, radiographic convention) -- bisect the superior endplate
+        between its anterior and posterior corners. This is the operational method
+        Legaye/Duval-Beaupere defined PI with on lateral radiographs, so it is the
+        convention the published PI norms carry. It is also the only one derivable
+        from landmarks a model can see: both corners are visible cortical points.
+
+    mode="overmask"  -- ostk's alternative: the centre of the endplate portion actually
+        backed by vertebral body, projected onto the same rim line. Anatomically
+        well-argued (the endplate IS the body's superior surface) and more robust to a
+        degenerate or osteophytic corner. It sits ~21% of the rim anterior of the
+        bisector on case 0003 (7.4 mm along the endplate, 0.0 mm perpendicular), which
+        moves PI/PT by ~2-3 deg and leaves SS/LL untouched. NOT derivable from the two
+        corners -- it needs the 3-D body mask -- so on a radiograph it would have to be
+        its own predicted channel, with no visible landmark under it. Kept because the
+        argument for it is real and it may render better; see docs/PIPELINE.md.
+    """
+    if mode == "corner":
+        a, p = corners.get("sup_ant"), corners.get("sup_post")
+        if a is None or p is None:
+            return None
+        return [0.5 * (a[0] + p[0]), 0.5 * (a[1] + p[1])]
+    if mode == "overmask":
+        return corners.get("sup_overmask")            # emitted by the builder when asked
+    raise ValueError(f"unknown pi anchor mode {mode!r}")

@@ -48,9 +48,25 @@ CORNER_LEVELS = tuple([f"C{i}" for i in range(1, 8)] + [f"T{i}" for i in range(1
 FEMORAL_LABELS = ("femur_left", "femur_right")
 
 
+def _overmask_anchor_px(lab, aff, plan, level_name):
+    """ostk's over-mask endplate anchor, projected to detector pixels. Kept as an
+    OPTION (see oblique.pi_anchor_2d) -- not the default, which follows the
+    radiographic convention of bisecting the endplate between its corners."""
+    from ostk.spine import endplate_overmask_midpoint_from_label
+    p3 = endplate_overmask_midpoint_from_label(lab, aff, level_name, which="superior")
+    if p3 is None:
+        return None
+    p3 = np.asarray(p3, float)
+    right = np.asarray(plan["right"], float); up = np.asarray(plan["up"], float)
+    sp = plan["pixel_spacing_mm"]; H = plan["shape"][0]
+    return [float((p3 @ right - plan["u0"]) / sp - 0.5),
+            float((H - 1) - ((p3 @ up - plan["v0"]) / sp - 0.5))]
+
+
 def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma=0.55,
                        pixel_spacing_mm=1.0, yaw_deg=12.0, pitch_deg=8.0, roll_deg=6.0,
-                       drop_ids=(), ostk_path=None):
+                       drop_ids=(), ostk_path=None, pi_anchor="corner",
+                       also_overmask=True):
     """N randomly-oblique lateral views of one CT, each with labels + endplate corners
     projected through the SAME geometry.
 
@@ -64,8 +80,10 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
     from the 2-D silhouette, which is 26-32 deg wrong because the ala is superimposed.
     """
     import nibabel as nib
-    from .oblique import (endplate_corners_2d, oblique_plan, project_footprints,
-                          render, sample_view)
+    from .oblique import CORNER_KEYS
+    from .oblique import (endplate_corners_2d, oblique_plan, pi_anchor_2d,
+                          project_footprints, render, sample_view,
+                          vertebra_corners_2d)
     try:
         from ostk.labels import LABELS
     except Exception:                                     # noqa: BLE001
@@ -117,19 +135,31 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
                    (Hh - 1) - ((c @ up3 - plan["v0"]) / sp3 - 0.5)] for c in heads_world]
             fem_px = [float(np.mean([q[0] for q in px])),
                       float(np.mean([q[1] for q in px]))]
+        # FOUR corners per level (both endplates) -- the standard vertebral annotation
+        # on spine radiographs, so this is directly comparable to corner-annotated real
+        # datasets, and it gives every segmental disc angle for free.
         corners = {}
         for name in CORNER_LEVELS:
             lid = LABELS.get(name)
             if lid is None or not (lab == lid).any():
                 continue
             try:
-                c = endplate_corners_2d(lab, aff, plan, lid, level_name=name,
-                                        ostk_path=ostk_path)
+                c4 = vertebra_corners_2d(lab, aff, plan, lid, level_name=name,
+                                         ostk_path=ostk_path)
             except Exception:                             # noqa: BLE001
-                c = None
-            if c is not None:
-                corners[name] = {"anterior": [float(x) for x in c[0]],
-                                 "posterior": [float(x) for x in c[1]]}
+                c4 = None
+            if not c4:
+                continue
+            # the alternative PI anchor, kept alongside so the convention stays a
+            # choice at analysis time rather than baked into the generated data
+            if also_overmask and name == "S1":
+                try:
+                    om = _overmask_anchor_px(lab, aff, plan, name)
+                    if om is not None:
+                        c4["sup_overmask"] = om
+                except Exception:                         # noqa: BLE001
+                    pass
+            corners[name] = c4
         tag = f"lat{k:02d}"
         _save_png(os.path.join(out_dir, f"{tag}_drr.png"), to_uint8(drr))
         np.save(os.path.join(out_dir, f"{tag}_drr.npy"), drr.astype(np.float32))
@@ -140,7 +170,11 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
                    "yaw_deg": v["yaw_deg"], "pitch_deg": v["pitch_deg"],
                    "roll_deg": v["roll_deg"], "endplate_corners": corners,
                    "bicoxofemoral_px": fem_px,
-                   "n_channels": 2 * len(corners) + (1 if fem_px else 0)},
+                   "pi_anchor_mode": pi_anchor,
+                   "pi_anchor_px": (pi_anchor_2d(corners["S1"], mode=pi_anchor)
+                                    if "S1" in corners else None),
+                   "n_channels": sum(len([k for k in c if k in CORNER_KEYS])
+                                     for c in corners.values()) + (1 if fem_px else 0)},
                   open(os.path.join(out_dir, f"{tag}_corners.json"), "w"), indent=2)
         rows.append({"view": tag, "n_corner_levels": len(corners),
                      "has_bicox": int(fem_px is not None),
@@ -228,6 +262,12 @@ def main(argv=None):
     p.add_argument("--pitch_deg", type=float, default=8.0)
     p.add_argument("--roll_deg", type=float, default=6.0)
     p.add_argument("--pixel_spacing_mm", type=float, default=1.0)
+    p.add_argument("--pi_anchor", choices=("corner", "overmask"), default="corner",
+                   help="S1 point PI/PT are measured from. 'corner' (default) bisects "
+                        "the superior endplate between its corners -- the radiographic "
+                        "convention the published PI norms carry, and the only one a "
+                        "model can derive from visible landmarks. 'overmask' is ostk's "
+                        "bony-support centre (kept as an option).")
     p.add_argument("--ostk_path", default=None,
                    help="path to an OpenSpineToolkit checkout (needed for endplate corners)")
     p.add_argument("--no_ribs", action="store_true",
@@ -258,7 +298,8 @@ def main(argv=None):
                     seed=abs(hash(case)) % (2 ** 31),   # per-case seed: reproducible views
                     gamma=a.gamma, pixel_spacing_mm=a.pixel_spacing_mm,
                     yaw_deg=a.yaw_deg, pitch_deg=a.pitch_deg, roll_deg=a.roll_deg,
-                    drop_ids=drop_ids, ostk_path=a.ostk_path)
+                    drop_ids=drop_ids, ostk_path=a.ostk_path,
+                    pi_anchor=a.pi_anchor)
             else:
                 rows = build_case(ct, lab, os.path.join(a.out_dir, case), views, a.gamma,
                                   drop_ids=drop_ids)
