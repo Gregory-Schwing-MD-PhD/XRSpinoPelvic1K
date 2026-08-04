@@ -108,7 +108,16 @@ def _grid(plan):
     us = plan["u0"] + (np.arange(W) + 0.5) * sp
     vs = plan["v0"] + (np.arange(H) + 0.5) * sp
     U, V = np.meshgrid(us, vs)
-    # rows are built so that row 0 is the MOST CRANIAL -> superior appears up
+    # rows are built so that row 0 is the MOST CRANIAL -> superior appears up.
+    #
+    # KNOWN ISSUE: columns are NOT flipped, so these renders put anterior on the RIGHT,
+    # while xrsp/drr.py, the existing dataset and the PACS demo put it on the LEFT.
+    # Do not "fix" it by negating `right` (makes the basis left-handed) or by mirroring
+    # the column in the pixel maps (changes which corner measure.py treats as anterior).
+    # Both were tried: SS went 32.9 -> 6.9 and the PI identity blew out to 66 deg.
+    # The flip has to be applied consistently across _grid, project_footprints, every
+    # to_px, AND measure.py's anterior convention, in one deliberate change with the
+    # angle checks green at each step.
     base = U[..., None] * right + V[..., None] * up
     return base[::-1, :, :]
 
@@ -174,7 +183,7 @@ def project_footprints(label, affine, plan, ids: Optional[Iterable[int]] = None
 
 def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
                         which: str = "superior", min_voxels: int = 50,
-                        ostk_path: str = None):
+                        ostk_path: str = None, corner_params: dict = None):
     """The two 2-D corners of one vertebra's endplate: FIT IN 3-D, then projected.
 
     Delegates the fit to ostk (spine.endplate_from_label / corner_params_for_level),
@@ -210,7 +219,8 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
         return None
     d = np.asarray(plan["direction"], float)
     up3 = np.asarray(plan["up"], float)
-    kw = {k: v for k, v in corner_params_for_level(name).items()
+    _params = dict(corner_params) if corner_params is not None else         dict(corner_params_for_level(name))
+    kw = {k: v for k, v in _params.items()
           if k in endplate_corners.__code__.co_varnames}
     res = endplate_corners(pts, normal_axis=up3, which=which, lr=d, **kw)
     if res is None:
@@ -232,9 +242,39 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
 
 CORNER_KEYS = ("sup_ant", "sup_post", "inf_ant", "inf_post")
 
+# Corner parameters for ANNOTATION, which is not the same job as plane fitting.
+#
+# ostk's corner_params_for_level is tuned to fit a robust endplate PLANE: it drops the
+# posterior 42% and skips the anterior 8% so an osteophyte lip or the canal down-slope
+# cannot tilt the fit. Excellent for an angle; wrong for a training target, because the
+# surviving "corners" then sit well inside the body -- measured on case 0003 they spanned
+# only 36-53% of the vertebral body's A-P width, and a model trained on them would place
+# corners inside the vertebra while BUU's human annotators mark the true cortical margins.
+#
+# So annotation keeps the MEDIAL BAND (lat_frac -- that is what drops the sacral ala, and
+# it is the whole reason the endplate is recoverable at all) and drops the trimming.
+# Span goes to 69-92%.
+# CORRECTION: an earlier version set drop_post=0.0, ant_skip=0.0 here to make the corner
+# span cover more of the vertebral body (36-53% -> 69-92%). That was WRONG and is kept
+# here as a warning. drop_post is not cosmetic trimming: it exists to stop the posterior
+# down-slope toward the spinal canal from tilting the endplate fit. Removing it wrecked
+# the ORIENTATION, which is what every angle depends on -- SS went 32.89 -> 6.87 and LL
+# 45.06 -> 30.72 while the corners still passed every "on-bone" check. Span is not
+# correctness.
+#
+# So annotation uses ostk's own per-level parameters. The open question this leaves is
+# real but separate: these corners are ENDPLATE-LINE endpoints, not the true cortical
+# margins a human annotator marks, so a model trained on them will not be directly
+# comparable to BUU's corner annotations without reconciling the two definitions. That
+# needs a deliberate decision (extend along the fitted line to the cortical edge? train
+# on the line and derive corners? annotate a reconciliation subset?), not a parameter
+# tweak -- see docs/PIPELINE.md.
+ANNOTATION_CORNER_PARAMS = None
+
 
 def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
-                        min_voxels: int = 50, ostk_path: str = None):
+                        min_voxels: int = 50, ostk_path: str = None,
+                        corner_params: dict = None):
     """All FOUR corners of one vertebra -- both endplates -- in detector pixels.
 
         sup_ant  ---- sup_post      superior endplate
@@ -258,7 +298,7 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
         try:
             c = endplate_corners_2d(label, affine, plan, level_id, level_name=level_name,
                                     which=which, min_voxels=min_voxels,
-                                    ostk_path=ostk_path)
+                                    ostk_path=ostk_path, corner_params=corner_params)
         except Exception:                                       # noqa: BLE001
             c = None
         if c is None:
