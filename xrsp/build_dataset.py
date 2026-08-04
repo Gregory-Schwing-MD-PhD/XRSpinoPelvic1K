@@ -167,7 +167,8 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
                 continue
             try:
                 c4 = vertebra_corners_2d(lab, aff, plan, lid, level_name=name,
-                                         ostk_path=ostk_path)
+                                         ostk_path=ostk_path,
+                                         footprint=fps.get(lid))
             except Exception:                             # noqa: BLE001
                 c4 = None
             if not c4:

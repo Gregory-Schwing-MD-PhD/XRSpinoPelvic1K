@@ -240,6 +240,31 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
 
 # ── 4-corner vertebral annotation ────────────────────────────────────────────────
 
+def anterior_sign(plan, sup_axis=None) -> float:
+    """+1 if patient-anterior runs along increasing pixel-x in `plan`, else -1.
+
+    Derived from the plan's own basis rather than assumed, so it stays right for the
+    oblique views too -- yaw rotates `right`, and a hardcoded sign would silently
+    mislabel corners on every view except the true lateral.
+
+    Needed because ostk's 3-D corner fit returns (anterior, posterior) in WORLD terms,
+    while `_grid` builds columns without a flip (see the KNOWN ISSUE there), so on this
+    detector anterior lands at +x. Emitting them in ostk's order put `sup_ant` at x=109
+    and `sup_post` at x=143 with the femoral heads -- which are anterior -- at x=178.
+    Angles are unaffected either way (measure.py takes the undirected line, verified:
+    SS/LL/PI/PT identical before and after), but the names have to be right to compare
+    against BUU, whose reader corners carry true anterior/posterior identity.
+    """
+    from .oblique import _u                                   # local: keeps import order
+    sup = np.asarray(sup_axis if sup_axis is not None else (0.0, 0.0, 1.0), float)
+    d = _u(np.asarray(plan["direction"], float))
+    right = np.asarray(plan["right"], float)
+    # anterior = sup x lr, the same right-handed convention ostk.spine.anterior_axis uses
+    ant = _u(np.cross(sup, d))
+    sgn = float(np.dot(ant, right))
+    return 1.0 if sgn >= 0 else -1.0
+
+
 CORNER_KEYS = ("sup_ant", "sup_post", "inf_ant", "inf_post")
 
 # Corner parameters for ANNOTATION, which is not the same job as plane fitting.
@@ -272,9 +297,36 @@ CORNER_KEYS = ("sup_ant", "sup_post", "inf_ant", "inf_post")
 ANNOTATION_CORNER_PARAMS = None
 
 
+def extend_to_cortex(p_a, p_b, footprint, **kw):
+    """DISABLED -- returns the fitted corners unchanged. Kept as a record.
+
+    Three attempts to push the endplate ends out to the cortex all failed, and the
+    reason they failed is that the premise was wrong: ostk's corners are ALREADY at the
+    vertebral body's cortical margins. Measured on case 0003, superior endplate span vs
+    vertebral BODY A-P depth --
+
+        L1  30.5 mm / 32.8 mm      L2  33.9 mm / 35.9 mm      L3  35.3 mm / 34.4 mm
+
+    (an adult lumbar body is ~30-38 mm A-P). They only looked short because the span was
+    first compared against the WHOLE vertebra, 86-92 mm, which includes the spinous
+    process and posterior elements.
+
+    The three failures, so they are not repeated:
+      1. walk outward from the midpoint until leaving the footprint -- the endplate lies
+         ON the footprint boundary, so it exits at once (spans 0-16 px, L3 exactly 0);
+      2. take the outright extremes of a band around the line -- swallows the posterior
+         elements (spans 51-73 mm);
+      3. grow outward but stop at a gap -- there IS no gap: in projection the pedicles
+         and lamina superimpose over the spinal canal, so the bone is contiguous from
+         body to spinous process along the line (spans 53-74 mm).
+
+    Any future attempt has to separate body from posterior elements in 3-D BEFORE
+    projecting, because that separation does not survive the projection.
+    """
+    return p_a, p_b
 def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
                         min_voxels: int = 50, ostk_path: str = None,
-                        corner_params: dict = None):
+                        corner_params: dict = None, footprint=None):
     """All FOUR corners of one vertebra -- both endplates -- in detector pixels.
 
         sup_ant  ---- sup_post      superior endplate
@@ -293,8 +345,13 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     Returns {"sup_ant": [x, y], ...} or None.
     """
     out = {}
-    for which, keys in (("superior", ("sup_ant", "sup_post")),
-                        ("inferior", ("inf_ant", "inf_post"))):
+    # S1 gets NO inferior endplate: it is fused to S2, so there is no disc space and no
+    # inferior endplate to mark. Emitting one drew a line across the middle of the
+    # sacrum, which is exactly as wrong as it looked.
+    _sides = (("superior", ("sup_ant", "sup_post")),)
+    if (level_name or "") != "S1":
+        _sides = _sides + (("inferior", ("inf_ant", "inf_post")),)
+    for which, keys in _sides:
         try:
             c = endplate_corners_2d(label, affine, plan, level_id, level_name=level_name,
                                     which=which, min_voxels=min_voxels,
@@ -303,8 +360,15 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
             c = None
         if c is None:
             continue
-        out[keys[0]] = [float(x) for x in c[0]]
-        out[keys[1]] = [float(x) for x in c[1]]
+        a, b = c
+        if footprint is not None:
+            a, b = extend_to_cortex(a, b, footprint)     # out to the cortical border
+        # Name the ends by where they actually land on THIS detector, not by the order
+        # ostk returns them in -- see anterior_sign.
+        if (b[0] - a[0]) * anterior_sign(plan) > 0:
+            a, b = b, a
+        out[keys[0]] = [float(x) for x in a]
+        out[keys[1]] = [float(x) for x in b]
     return out or None
 
 
