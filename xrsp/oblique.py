@@ -483,24 +483,64 @@ def _project_mask(mask, affine, plan):
     return out
 
 
-def extend_in_body(p_a, p_b, body_fp, *, band_px: float = 2.0, pct: float = 1.0):
-    """Run an endplate line out to the projected BODY's anterior and posterior edges.
+def _ransac_line_1d(s_arr, t_arr, *, thresh_px=1.5, iters=200, seed=0):
+    """Robust t = m*s + c by RANSAC. Returns (m, c) or None.
 
-    The 3-D fit gives the corner midsagittally, but a lateral radiograph shows a
-    PROJECTION: the posterior vertebral body line a reader marks is the posterior
-    cortical margin of the silhouette, and the body's posterolateral parts project
-    further back than the midsagittal wall does. Marking the midsagittal wall on a
-    projected image therefore stops visibly short of the body outline -- which is exactly
-    what the overlay showed at L1-L3.
+    A cortical wall is straight over the mid-body; an osteophyte is a gross outlier to
+    it. RANSAC is what makes the spur unable to move the line -- the whole point of
+    fitting the wall rather than taking the outline's extreme point.
+    """
+    s_arr = np.asarray(s_arr, float)
+    t_arr = np.asarray(t_arr, float)
+    if len(s_arr) < 2:
+        return None
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(s_arr), size=(int(iters), 2))
+    s0, s1 = s_arr[idx[:, 0]], s_arr[idx[:, 1]]
+    t0, t1 = t_arr[idx[:, 0]], t_arr[idx[:, 1]]
+    ds = s1 - s0
+    ok = np.abs(ds) > 1e-6
+    if not ok.any():
+        return None
+    m = ((t1 - t0)[ok]) / ds[ok]
+    c = t0[ok] - m * s0[ok]
+    resid = np.abs(t_arr[:, None] - (m[None, :] * s_arr[:, None] + c[None, :]))
+    inl = resid <= thresh_px
+    best = int(np.argmax(inl.sum(axis=0)))
+    keep = inl[:, best]
+    if keep.sum() < 2:
+        return None
+    A = np.c_[s_arr[keep], np.ones(int(keep.sum()))]
+    sol, *_ = np.linalg.lstsq(A, t_arr[keep], rcond=None)
+    return float(sol[0]), float(sol[1])
 
-    Only the ENDPOINTS move; the direction is the 3-D fitted one, so SS/LL/PI/PT are
+
+def extend_in_body(p_a, p_b, body_fp, *, wall_frac=(0.20, 0.80), thresh_px: float = 1.5,
+                   max_extend_px: float = 12.0):
+    """Corners = endplate tangent x the CORTICAL WALL LINES of the projected body.
+
+    Frobin's construction, applied where Frobin applies it -- the lateral projection.
+    The vertebral body is a quadrilateral bounded by two endplates and two cortical
+    walls, and a corner is where those lines MEET:
+      Frobin W, Brinckmann P, Biggemann M, Tillotson M, Burton K. Clin Biomech
+        1997;12(Suppl 1):S1-S63.
+
+    This deliberately does NOT take the silhouette's extreme point along the line. That
+    was the previous version and it chases osteophytes: the spur belongs to the vertebral
+    body label, so it is part of the projected silhouette, and the anterior corner landed
+    on the anterior lip of an osteophyte at 0003 L2 -- giving an acute, wrong endplate
+    angle. Excluding the spur is explicit morphometric convention, not a preference:
+      Genant HK, Wu CY, van Kuijk C, Nevitt MC. J Bone Miner Res 1993;8(9):1137-1148.
+      Black DM, Palermo L, Nevitt MC, et al. J Bone Miner Res 1995;10(6):890-902.
+    Fitting the wall by RANSAC makes the spur an outlier that cannot move the line, and
+    the corner then comes from the intersection rather than from any single voxel.
+
+    It also reaches the corner where the surface curves away, which taking the last
+    on-plate voxel could not: the posterior corner no longer stops at the start of the
+    concave-up turn into the posterior wall.
+
+    Only the ENDPOINTS move -- direction is the 3-D fitted one, so SS/LL/PI/PT are
     untouched.
-
-    This is safe here for one reason: `body_fp` is the footprint of the ISOLATED body.
-    The same idea against a whole-vertebra footprint was the original failure -- the line
-    ran back through the pedicles into the lamina and spinous process, because in
-    projection the pedicles superimpose over the canal and the bone is continuous all the
-    way to the tip. With the posterior elements removed there is nothing to run to.
     """
     a = np.asarray(p_a, float)
     b = np.asarray(p_b, float)
@@ -512,18 +552,48 @@ def extend_in_body(p_a, p_b, body_fp, *, band_px: float = 2.0, pct: float = 1.0)
     nrm = np.array([-d[1], d[0]])
     ys, xs = np.nonzero(body_fp)
     rel = np.stack([xs, ys], axis=1).astype(float) - a
-    near = rel[np.abs(rel @ nrm) <= band_px]
-    if len(near) < 4:
+    t_all = rel @ d                       # along the endplate line
+    s_all = rel @ nrm                     # perpendicular; the plate itself is s = 0
+    if len(t_all) < 12:
         return p_a, p_b
-    t = near @ d
-    lo, hi = np.percentile(t, [pct, 100.0 - pct])      # percentile: ignore stray specks
-    # The silhouette edge is the ANSWER, not a floor. An earlier version clamped with
-    # min(lo,0)/max(hi,n) so the 3-D corner could never be pulled inward -- but a 3-D
-    # corner can land OUTSIDE the projected body, and then the clamp preserved the error
-    # instead of correcting it: both L5 plates on 0003 sat 6 mm past the body edge, which
-    # is also why wedge_L5 fell outside the BUU reader band. The corner belongs ON the
-    # body outline, so the percentile extremes are used in both directions.
-    return (a + float(lo) * d), (a + float(hi) * d)
+
+    # the body lies to ONE side of the plate: keep that side, and use its middle band,
+    # where the wall is wall and not yet the opposite endplate's rim turning over
+    side = np.sign(np.median(s_all)) or 1.0
+    sel = (s_all * side) >= 0
+    if sel.sum() < 12:
+        return p_a, p_b
+    ss, tt = s_all[sel] * side, t_all[sel]
+    hi = np.quantile(ss, wall_frac[1])
+    lo = np.quantile(ss, wall_frac[0])
+    band = (ss >= lo) & (ss <= hi)
+    if band.sum() < 8:
+        return p_a, p_b
+    sb, tb = ss[band], tt[band]
+
+    # per row of the band, the two extreme positions along the line = the two walls
+    nb = max(8, min(40, int(np.ptp(sb)) + 1))
+    bins = np.clip(((sb - sb.min()) / (np.ptp(sb) + 1e-9) * nb).astype(int), 0, nb - 1)
+    rows_s, rows_lo, rows_hi = [], [], []
+    for k in np.unique(bins):
+        mk = bins == k
+        rows_s.append(float(np.median(sb[mk])))
+        rows_lo.append(float(tb[mk].min()))
+        rows_hi.append(float(tb[mk].max()))
+    if len(rows_s) < 3:
+        return p_a, p_b
+
+    out_t = [0.0, n]
+    for i, rows_t in enumerate((rows_lo, rows_hi)):
+        fit = _ransac_line_1d(rows_s, rows_t, thresh_px=thresh_px)
+        if fit is None:
+            continue
+        m, c = fit
+        cand = c                          # the wall extrapolated to the plate (s = 0)
+        base = out_t[i]
+        if abs(cand - base) <= max_extend_px:   # refuse an absurd extrapolation
+            out_t[i] = cand
+    return (a + float(out_t[0]) * d), (a + float(out_t[1]) * d)
 
 
 def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
