@@ -191,6 +191,27 @@ def project_footprints(label, affine, plan, ids: Optional[Iterable[int]] = None
     return out
 
 
+def _crop_level(lab, affine, level_id: int, *, extra_ids=(), only_id=None):
+    """(cropped mask, cropped affine) for one level, or (None, None).
+
+    The body isolation needs a VOXEL GRID -- the canal is found by filling holes in axial
+    sections -- so unlike the point-cloud fit it cannot take world coordinates. Cropping
+    keeps it cheap; a vertebra is a tiny fraction of a torso volume.
+    """
+    m = (lab == level_id)
+    for e in extra_ids:                                # widen the CROP (and the context)
+        m = m | (lab == e)
+    if not m.any():
+        return None, None
+    sl = ndimage.find_objects(m.astype(np.uint8))[0]
+    if only_id is not None:                            # same crop, target level only
+        return (lab == only_id)[sl], None
+    off = np.array([sl[0].start, sl[1].start, sl[2].start], float)
+    A2 = np.asarray(affine, float).copy()
+    A2[:3, 3] = A2[:3, 3] + A2[:3, :3] @ off
+    return m[sl], A2
+
+
 def _level_points_world(lab, affine, level_id: int, largest_component):
     """World-mm points of one level's largest connected component.
 
@@ -215,7 +236,8 @@ def _level_points_world(lab, affine, level_id: int, largest_component):
 def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
                         which: str = "superior", min_voxels: int = 50,
                         ostk_path: str = None, corner_params: dict = None,
-                        anatomic: bool = True, points=None):
+                        anatomic: bool = True, points=None,
+                        return_rms: bool = False, method: str = "body"):
     """The two 2-D corners of one vertebra's endplate: FIT IN 3-D, then projected.
 
     Delegates the fit to ostk (spine.endplate_from_label / corner_params_for_level),
@@ -266,8 +288,44 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     # right for a Cobb line and wrong for a label). The corner slides ALONG the fitted
     # line, so the direction -- hence every angle -- is unchanged; see the function's
     # docstring for the two approaches that failed before this one.
-    fn = endplate_corners_anatomic if anatomic else endplate_corners
-    res = fn(pts, normal_axis=up3, which=which, lr=d, **kw)
+    if method == "body":
+        # PRINCIPLED PATH: isolate the vertebral BODY (spinal canal as the separator),
+        # then fit the endplate by RANSAC. See ostk.vertebral_body for the method and
+        # its prior art (Yao 2006 / Naegel 2007 partition, Mastmeyer 2006 body coordinate
+        # system, Fischler & Bolles 1981 RANSAC). This drops every tuned constant the
+        # old path needed -- drop_post, rim_mm, gap_min_mm, max_snap_mm -- because once
+        # the posterior elements are gone there is nothing left to exclude.
+        from ostk.vertebral_body import endplate_corners_body
+        lab_arr = np.asarray(label)
+        # S1's canal must be found on S1 | sacrum. v4 carves S1 off the sacrum top, and
+        # that carve can slice the arch so the ring never closes in any one section --
+        # 0001's S1 has 0 closed sections and 0 hole voxels on its own, while the sacrum
+        # below it has 47. Without the union S1 falls through to the watershed and the
+        # endplate line runs across the whole sacrum into the posterior elements.
+        ctx = None
+        if (level_name or "") == "S1":
+            from .labels import labels_for
+            sac = labels_for(lab_arr).get("sacrum")
+            if sac is not None and (lab_arr == sac).any():
+                sub, A2 = _crop_level(lab_arr, np.asarray(affine, float),
+                                      int(level_id), extra_ids=(int(sac),))
+                ctx = sub
+                sub = sub & _crop_level(lab_arr, np.asarray(affine, float),
+                                        int(level_id), extra_ids=(int(sac),),
+                                        only_id=int(level_id))[0]
+        if ctx is None:
+            sub, A2 = _crop_level(lab_arr, np.asarray(affine, float), int(level_id))
+        if sub is None:
+            return None
+        r = endplate_corners_body(sub, A2, which, sup_axis=up3, lr=d, canal_from=ctx)
+        if r is None:
+            return None
+        res = (r[0], r[1], None, r[2])
+    else:
+        fn = endplate_corners_anatomic if anatomic else endplate_corners
+        if anatomic and return_rms:
+            kw["return_rms"] = True
+        res = fn(pts, normal_axis=up3, which=which, lr=d, **kw)
     if res is None:
         return None
     p_lo, p_hi = np.asarray(res[0], float), np.asarray(res[1], float)
@@ -280,7 +338,10 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
         return np.array([(P @ right - plan["u0"]) / sp - 0.5,
                          (H - 1) - ((P @ up - plan["v0"]) / sp - 0.5)])
     a_px, b_px = to_px(p_lo), to_px(p_hi)
-    return (a_px, b_px) if a_px[0] <= b_px[0] else (b_px, a_px)
+    pair = (a_px, b_px) if a_px[0] <= b_px[0] else (b_px, a_px)
+    if return_rms:
+        return pair[0], pair[1], (float(res[3]) if len(res) > 3 else float("nan"))
+    return pair
 
 
 # ── 4-corner vertebral annotation ────────────────────────────────────────────────
@@ -371,7 +432,8 @@ def extend_to_cortex(p_a, p_b, footprint, **kw):
     return p_a, p_b
 def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
                         min_voxels: int = 50, ostk_path: str = None,
-                        corner_params: dict = None, footprint=None):
+                        corner_params: dict = None, footprint=None,
+                        max_rms_mm: float = 4.0, rms_out: dict = None):
     """All FOUR corners of one vertebra -- both endplates -- in detector pixels.
 
         sup_ant  ---- sup_post      superior endplate
@@ -406,12 +468,23 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
         try:
             c = endplate_corners_2d(label, affine, plan, level_id, level_name=level_name,
                                     which=which, min_voxels=min_voxels, points=_pts,
+                                    return_rms=True,
                                     ostk_path=ostk_path, corner_params=corner_params)
         except Exception:                                       # noqa: BLE001
             c = None
         if c is None:
             continue
-        a, b = c
+        a, b, rms = c
+        if rms_out is not None:
+            rms_out[which] = rms
+        # DROP an endplate whose own plate fit did not converge. The residual separates
+        # cleanly -- sound levels sit at 0.5-2.5 mm, failures at 6.9-12.2 -- and the
+        # failures are visibly wrong: on case 0004 T12's two plates diverged by 32.8 deg,
+        # wedging the body OPEN anteriorly, the reverse of the anatomy. Emitting that as
+        # training truth is worse than emitting nothing, and the loss is already masked
+        # per channel for partial annotation, so a missing endplate costs nothing.
+        if np.isfinite(rms) and rms > max_rms_mm:
+            continue
         if footprint is not None:
             a, b = extend_to_cortex(a, b, footprint)     # out to the cortical border
         # Name the ends by where they actually land on THIS detector, not by the order
