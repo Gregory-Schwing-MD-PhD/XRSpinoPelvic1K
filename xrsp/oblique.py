@@ -204,27 +204,35 @@ def _level_crop(lab, affine, level_id: int, level_name, up3, d, bbox=None):
     the whole sacrum into the posterior elements.
     """
     from ostk.vertebral_body import body_mask
-    m = (lab == level_id)
-    if not m.any():
-        return None, None, None, None
     ctx_ids = ()
     if (level_name or "") == "S1":
         from .labels import labels_for
         sac = labels_for(lab).get("sacrum")
-        if sac is not None and (lab == sac).any():
+        if sac is not None:
             ctx_ids = (int(sac),)
-    wide = m.copy()
-    for e in ctx_ids:
-        wide = wide | (lab == e)
-    # `bbox` avoids a per-level find_objects over the whole volume. ndimage.find_objects
-    # returns EVERY label's box in one pass, so the caller computes it once per case --
-    # the repeated full-volume passes were 14 s per level on a torso CT.
-    sl = bbox if (bbox is not None and not ctx_ids) else         ndimage.find_objects(wide.astype(np.uint8))[0]
+
+    # SLICE FIRST, compare second. `bbox` (every label's box, from one find_objects per
+    # case) means the whole-volume `lab == level_id` is never needed: on a torso CT that
+    # comparison sweeps 158M voxels and it was running per level, several times over,
+    # purely to build a mask that gets cropped away immediately afterwards.
+    if bbox is not None and not ctx_ids:
+        sl = bbox
+        sub = (lab[sl] == level_id)
+        if not sub.any():
+            return None, None, None, None
+        ctx = None
+    else:
+        m = (lab == level_id)
+        if not m.any():
+            return None, None, None, None
+        wide = m.copy()
+        for e in ctx_ids:
+            wide = wide | (lab == e)
+        sl = ndimage.find_objects(wide.astype(np.uint8))[0]
+        sub, ctx = m[sl], (wide[sl] if ctx_ids else None)
     off = np.array([sl[0].start, sl[1].start, sl[2].start], float)
     A2 = np.asarray(affine, float).copy()
     A2[:3, 3] = A2[:3, 3] + A2[:3, :3] @ off
-    sub = m[sl]
-    ctx = wide[sl] if ctx_ids else None
     body = body_mask(sub, A2, sup_axis=up3, lr=d, canal_from=ctx)
     return sub, A2, ctx, body
 
@@ -311,10 +319,17 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     # `points` lets the caller extract this level once and reuse it for BOTH faces --
     # the extraction is a full-volume compare plus a component pass, and doing it twice
     # per level was 48 s a case.
-    pts = (np.asarray(points, float) if points is not None else
-           _level_points_world(np.asarray(label), np.asarray(affine, float),
-                               int(level_id), largest_component))
-    if len(pts) < min_voxels:
+    # Only the point-cloud path needs this. It is a whole-volume compare plus a
+    # connected-component pass, and it was running unconditionally -- once per endplate
+    # FACE -- even though method="body" never touches `pts`. That single misplaced line
+    # was ~13 s per level, i.e. most of the runtime of a case.
+    if method == "body":
+        pts = None
+    else:
+        pts = (np.asarray(points, float) if points is not None else
+               _level_points_world(np.asarray(label), np.asarray(affine, float),
+                                   int(level_id), largest_component))
+    if pts is not None and len(pts) < min_voxels:
         return None
     d = np.asarray(plan["direction"], float)
     up3 = np.asarray(plan["up"], float)

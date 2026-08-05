@@ -141,9 +141,26 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
         try:
             from ostk.metrics import femoral_head_center
             for fem, hip in (("femur_left", "left_hip"), ("femur_right", "right_hip")):
+                # CROP to this side's femur+hip before fitting. femoral_head_center runs
+                # a connected-component pass, and over a whole torso volume that cost
+                # 129 s of a ~250 s case -- more than half the runtime, for a structure
+                # occupying a few percent of the voxels. The sphere fit is unchanged; it
+                # simply stops scanning the other 95% of the scan.
+                fid, hid = LABELS.get(fem), LABELS.get(hip)
+                if fid is None:
+                    continue
+                sel = (lab == fid)
+                if hid is not None:
+                    sel = sel | (lab == hid)
+                if not sel.any():
+                    continue
+                _sl = ndimage.find_objects(sel.astype(np.uint8))[0]
+                _off = np.array([_sl[0].start, _sl[1].start, _sl[2].start], float)
+                _aff = np.asarray(aff, float).copy()
+                _aff[:3, 3] = _aff[:3, 3] + _aff[:3, :3] @ _off
                 # LABELS is this volume's own map -- ostk would otherwise resolve
                 # `femur_left` through its legacy scheme and fit a thoracic vertebra.
-                res = femoral_head_center(lab, aff, fem, hip, labels=LABELS)
+                res = femoral_head_center(lab[_sl], _aff, fem, hip, labels=LABELS)
                 # returns (centre_xyz, radius_mm, rms) -- take the centre only
                 if res is not None and len(res):
                     heads_world.append(np.asarray(res[0], float))
