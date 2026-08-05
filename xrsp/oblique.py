@@ -517,7 +517,12 @@ def extend_in_body(p_a, p_b, body_fp, *, band_px: float = 2.0, pct: float = 1.0)
         return p_a, p_b
     t = near @ d
     lo, hi = np.percentile(t, [pct, 100.0 - pct])      # percentile: ignore stray specks
-    lo, hi = min(lo, 0.0), max(hi, n)                  # never pull the corners inward
+    # The silhouette edge is the ANSWER, not a floor. An earlier version clamped with
+    # min(lo,0)/max(hi,n) so the 3-D corner could never be pulled inward -- but a 3-D
+    # corner can land OUTSIDE the projected body, and then the clamp preserved the error
+    # instead of correcting it: both L5 plates on 0003 sat 6 mm past the body edge, which
+    # is also why wedge_L5 fell outside the BUU reader band. The corner belongs ON the
+    # body outline, so the percentile extremes are used in both directions.
     return (a + float(lo) * d), (a + float(hi) * d)
 
 
