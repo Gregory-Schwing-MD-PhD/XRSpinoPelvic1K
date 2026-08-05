@@ -44,3 +44,49 @@ def lid(name: str) -> int:
 
 def lname(i: int):
     return NAMES.get(int(i))
+
+# ── Legacy scheme + detection ────────────────────────────────────────────────────
+# The v3/legacy scheme (L1=1, S1=7, sacrum=8, hips=9/10, femurs=11/12, T1..T13=13..25,
+# ribs from 26) is NOT dead on disk, even though v4 supersedes it: the PACS demo cases
+# under openspineconsortium.github.io/pacs/data are still written in it, and it is what
+# ostk.labels carries. Reading a v4 volume with the legacy map, or the reverse, does not
+# fail -- it silently returns the WRONG STRUCTURE. `L1` resolves to id 1, which is C1 in
+# v4, so a generation run produces a whole dataset of confidently mislabelled levels.
+# That is exactly what xrsp/build_dataset.py did until this was added: it imported
+# ostk.labels (legacy) while this module, the documented source of truth, held v4.
+LABELS_LEGACY = {}
+for _i, _nm in enumerate(["L1", "L2", "L3", "L4", "L5", "L6", "S1", "sacrum",
+                          "left_hip", "right_hip", "femur_left", "femur_right"], start=1):
+    LABELS_LEGACY[_nm] = _i
+for _n in range(1, 14):
+    LABELS_LEGACY[f"T{_n}"] = 12 + _n                      # T1..T13 -> 13..25
+for _n in range(1, 9):
+    LABELS_LEGACY[f"rib_left_{_n}"] = 25 + _n              # 26..33
+
+LABELS_V4 = dict(LABELS)
+
+
+def detect_scheme(label) -> str:
+    """'v4' or 'legacy', from the SACRUM, which both schemes contain and which is always
+    large when it is present at all.
+
+    id 8 is `sacrum` in legacy but `T1` in v4; id 26 is `sacrum` in v4 but `rib_left_1`
+    in legacy. On an abdominopelvic CT the sacrum dwarfs both alternatives, so whichever
+    id carries the bigger object names the scheme -- measured, on the two forms on disk:
+
+        demo 0003 (legacy):  id 8 = 35797 vox (sacrum),  id 26 =   8542 (rib_left_1)
+        HF 0001   (v4):      id 8 = 0                 ,  id 26 = 347776 (sacrum)
+
+    Ties and empties fall back to v4, the current scheme. Pass an ndarray of label ids.
+    """
+    import numpy as _np
+    arr = _np.asarray(label)
+    n8 = int((arr == 8).sum())
+    n26 = int((arr == 26).sum())
+    return "legacy" if n8 > n26 else "v4"
+
+
+def labels_for(label) -> dict:
+    """The name->id map matching `label`'s own scheme. Use this instead of importing a
+    fixed map, so a volume in either scheme reads correctly."""
+    return LABELS_LEGACY if detect_scheme(label) == "legacy" else LABELS_V4

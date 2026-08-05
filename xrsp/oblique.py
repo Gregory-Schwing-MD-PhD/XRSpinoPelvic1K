@@ -160,31 +160,62 @@ def project_footprints(label, affine, plan, ids: Optional[Iterable[int]] = None
     A human annotating the radiograph cannot produce this -- which is the whole point.
     """
     lab = np.asarray(label)
-    ids = list(ids) if ids is not None else [int(v) for v in np.unique(lab) if v]
     H, W = plan["shape"]
     sp = plan["pixel_spacing_mm"]
     right = np.asarray(plan["right"], float)
     up = np.asarray(plan["up"], float)
+    # ONE pass over the volume, then group by label value. The obvious loop -- `lab == i`
+    # per id -- rescans all 158M voxels of a torso CT for each of ~25 ids and cost 122 s
+    # a case, by far the pipeline's dominant expense (`render` itself is 1.6 s). The
+    # projection is identical; only the traversal changed.
+    idx = np.array(np.nonzero(lab)).T
+    if not len(idx):
+        return {}
+    vals = lab[idx[:, 0], idx[:, 1], idx[:, 2]]
+    keep = set(int(v) for v in (ids if ids is not None else np.unique(vals)))
+    world = (np.c_[idx, np.ones(len(idx))] @ np.asarray(affine, float).T)[:, :3]
+    c = np.floor((world @ right - plan["u0"]) / sp).astype(int)
+    r = (H - 1) - np.floor((world @ up - plan["v0"]) / sp).astype(int)
+    ok = (c >= 0) & (c < W) & (r >= 0) & (r < H)
     out = {}
-    for i in ids:
-        idx = np.array(np.nonzero(lab == i))
-        if not idx.size:
+    for i in np.unique(vals):
+        i = int(i)
+        if i == 0 or i not in keep:
             continue
-        world = (np.c_[idx.T, np.ones(idx.shape[1])] @ np.asarray(affine, float).T)[:, :3]
-        c = np.floor((world @ right - plan["u0"]) / sp).astype(int)
-        r = np.floor((world @ up - plan["v0"]) / sp).astype(int)
-        r = (H - 1) - r                                   # match render's row flip
-        ok = (c >= 0) & (c < W) & (r >= 0) & (r < H)
+        sel = ok & (vals == i)
+        if not sel.any():
+            continue
         m = np.zeros((H, W), bool)
-        m[r[ok], c[ok]] = True
+        m[r[sel], c[sel]] = True
         out[i] = m
     return out
+
+
+def _level_points_world(lab, affine, level_id: int, largest_component):
+    """World-mm points of one level's largest connected component.
+
+    Crops to the level's bounding box BEFORE the connected-component pass. That pass is
+    the pipeline's dominant cost -- it runs once per level per endplate face, ~40 times a
+    case, and over a full torso volume it made a single case take longer than the whole
+    rest of generation. One vertebra occupies a tiny fraction of the volume, so cropping
+    is a pure win: same component, a fraction of the work.
+    """
+    m = (lab == level_id)
+    if not m.any():
+        return np.empty((0, 3))
+    sl = ndimage.find_objects(m.astype(np.uint8))[0]
+    sub = largest_component(m[sl])
+    idx = np.array(np.nonzero(sub)).T
+    if not len(idx):
+        return np.empty((0, 3))
+    idx = idx + np.array([sl[0].start, sl[1].start, sl[2].start])
+    return (np.c_[idx, np.ones(len(idx))] @ affine.T)[:, :3]
 
 
 def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
                         which: str = "superior", min_voxels: int = 50,
                         ostk_path: str = None, corner_params: dict = None,
-                        anatomic: bool = True):
+                        anatomic: bool = True, points=None):
     """The two 2-D corners of one vertebra's endplate: FIT IN 3-D, then projected.
 
     Delegates the fit to ostk (spine.endplate_from_label / corner_params_for_level),
@@ -206,17 +237,23 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     try:
         from ostk.spine import (endplate_corners, endplate_corners_anatomic,
                                 corner_params_for_level)
-        from ostk.labels import LABELS
         from ostk.masks import binary_mask, largest_component, mask_world
     except Exception as exc:                                   # noqa: BLE001
         raise RuntimeError(
             "endplate_corners_2d needs OpenSpineToolkit for the 3-D endplate fit "
             f"(pass ostk_path=...): {type(exc).__name__}: {exc}") from exc
-    name = level_name or {v: k for k, v in LABELS.items()}.get(int(level_id))
+    # Name from the volume's OWN scheme (see xrsp.labels.detect_scheme); ostk.labels is
+    # the legacy map and mis-names every level on a v4 volume.
+    from .labels import labels_for
+    name = level_name or {v: k for k, v in labels_for(label).items()}.get(int(level_id))
     if name is None:
         return None
-    pts = mask_world(largest_component(binary_mask(np.asarray(label), int(level_id))),
-                     np.asarray(affine, float))
+    # `points` lets the caller extract this level once and reuse it for BOTH faces --
+    # the extraction is a full-volume compare plus a component pass, and doing it twice
+    # per level was 48 s a case.
+    pts = (np.asarray(points, float) if points is not None else
+           _level_points_world(np.asarray(label), np.asarray(affine, float),
+                               int(level_id), largest_component))
     if len(pts) < min_voxels:
         return None
     d = np.asarray(plan["direction"], float)
@@ -353,6 +390,12 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     Returns {"sup_ant": [x, y], ...} or None.
     """
     out = {}
+    try:
+        from ostk.masks import largest_component
+        _pts = _level_points_world(np.asarray(label), np.asarray(affine, float),
+                                   int(level_id), largest_component)
+    except Exception:                                      # noqa: BLE001
+        _pts = None
     # S1 gets NO inferior endplate: it is fused to S2, so there is no disc space and no
     # inferior endplate to mark. Emitting one drew a line across the middle of the
     # sacrum, which is exactly as wrong as it looked.
@@ -362,7 +405,7 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     for which, keys in _sides:
         try:
             c = endplate_corners_2d(label, affine, plan, level_id, level_name=level_name,
-                                    which=which, min_voxels=min_voxels,
+                                    which=which, min_voxels=min_voxels, points=_pts,
                                     ostk_path=ostk_path, corner_params=corner_params)
         except Exception:                                       # noqa: BLE001
             c = None

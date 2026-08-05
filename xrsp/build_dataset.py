@@ -97,14 +97,19 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
     from .oblique import (endplate_corners_2d, oblique_plan, pi_anchor_2d,
                           project_footprints, render, sample_view,
                           vertebra_corners_2d)
-    try:
-        from ostk.labels import LABELS
-    except Exception:                                     # noqa: BLE001
-        LABELS = {}
+    from .labels import detect_scheme, labels_for
     rng = np.random.default_rng(seed)
     ct = nib.load(ct_path)
     vol, aff = np.asanyarray(ct.dataobj).astype(np.float32), ct.affine
     lab = np.asanyarray(nib.load(label_path).dataobj).astype(np.int16)
+    # Resolve names against THIS volume's scheme, never a fixed map. This used to import
+    # ostk.labels, which is the LEGACY scheme, while the shipped v4 dataset numbers the
+    # spine VerSe-native -- so `L1` resolved to id 1, which is C1 in v4. It does not
+    # error, it silently returns the wrong structure, and a generation run would have
+    # produced an entire dataset of confidently mislabelled levels. The demo cases are
+    # legacy and the dataset is v4, so both maps have to stay reachable.
+    LABELS = labels_for(lab)
+    _scheme = detect_scheme(lab)
     if drop_ids:
         lab[np.isin(lab, list(drop_ids))] = 0
     os.makedirs(out_dir, exist_ok=True)
@@ -133,7 +138,9 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
         try:
             from ostk.metrics import femoral_head_center
             for fem, hip in (("femur_left", "left_hip"), ("femur_right", "right_hip")):
-                res = femoral_head_center(lab, aff, fem, hip)
+                # LABELS is this volume's own map -- ostk would otherwise resolve
+                # `femur_left` through its legacy scheme and fit a thoracic vertebra.
+                res = femoral_head_center(lab, aff, fem, hip, labels=LABELS)
                 # returns (centre_xyz, radius_mm, rms) -- take the centre only
                 if res is not None and len(res):
                     heads_world.append(np.asarray(res[0], float))
