@@ -191,6 +191,44 @@ def project_footprints(label, affine, plan, ids: Optional[Iterable[int]] = None
     return out
 
 
+def _level_crop(lab, affine, level_id: int, level_name, up3, d, bbox=None):
+    """(level mask, cropped affine, canal context, isolated body) for one level.
+
+    Everything here is a property of the VERTEBRA, not of which endplate face is being
+    fitted, so it is built once and both faces reuse it.
+
+    S1's canal must be found on S1 | sacrum: v4 carves S1 off the sacrum top and that
+    carve can slice the arch so no axial section closes a ring -- 0001's S1 has 0 closed
+    sections and 0 hole voxels alone, against 47 for the sacrum below it. Without the
+    union S1 falls through to the watershed fallback and its endplate line runs across
+    the whole sacrum into the posterior elements.
+    """
+    from ostk.vertebral_body import body_mask
+    m = (lab == level_id)
+    if not m.any():
+        return None, None, None, None
+    ctx_ids = ()
+    if (level_name or "") == "S1":
+        from .labels import labels_for
+        sac = labels_for(lab).get("sacrum")
+        if sac is not None and (lab == sac).any():
+            ctx_ids = (int(sac),)
+    wide = m.copy()
+    for e in ctx_ids:
+        wide = wide | (lab == e)
+    # `bbox` avoids a per-level find_objects over the whole volume. ndimage.find_objects
+    # returns EVERY label's box in one pass, so the caller computes it once per case --
+    # the repeated full-volume passes were 14 s per level on a torso CT.
+    sl = bbox if (bbox is not None and not ctx_ids) else         ndimage.find_objects(wide.astype(np.uint8))[0]
+    off = np.array([sl[0].start, sl[1].start, sl[2].start], float)
+    A2 = np.asarray(affine, float).copy()
+    A2[:3, 3] = A2[:3, 3] + A2[:3, :3] @ off
+    sub = m[sl]
+    ctx = wide[sl] if ctx_ids else None
+    body = body_mask(sub, A2, sup_axis=up3, lr=d, canal_from=ctx)
+    return sub, A2, ctx, body
+
+
 def _crop_level(lab, affine, level_id: int, *, extra_ids=(), only_id=None):
     """(cropped mask, cropped affine) for one level, or (None, None).
 
@@ -237,7 +275,7 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
                         which: str = "superior", min_voxels: int = 50,
                         ostk_path: str = None, corner_params: dict = None,
                         anatomic: bool = True, points=None,
-                        return_rms: bool = False, method: str = "body"):
+                        return_rms: bool = False, method: str = "body", crop=None):
     """The two 2-D corners of one vertebra's endplate: FIT IN 3-D, then projected.
 
     Delegates the fit to ostk (spine.endplate_from_label / corner_params_for_level),
@@ -290,34 +328,18 @@ def endplate_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     # docstring for the two approaches that failed before this one.
     if method == "body":
         # PRINCIPLED PATH: isolate the vertebral BODY (spinal canal as the separator),
-        # then fit the endplate by RANSAC. See ostk.vertebral_body for the method and
-        # its prior art (Yao 2006 / Naegel 2007 partition, Mastmeyer 2006 body coordinate
-        # system, Fischler & Bolles 1981 RANSAC). This drops every tuned constant the
-        # old path needed -- drop_post, rim_mm, gap_min_mm, max_snap_mm -- because once
-        # the posterior elements are gone there is nothing left to exclude.
+        # then fit the endplate by RANSAC. See ostk.vertebral_body for the method and its
+        # prior art (Yao 2006 / Naegel 2007 partition, Mastmeyer 2006 body coordinate
+        # system, Fischler & Bolles 1981 RANSAC). Drops every tuned constant the old path
+        # needed -- once the posterior elements are gone there is nothing left to exclude.
         from ostk.vertebral_body import endplate_corners_body
-        lab_arr = np.asarray(label)
-        # S1's canal must be found on S1 | sacrum. v4 carves S1 off the sacrum top, and
-        # that carve can slice the arch so the ring never closes in any one section --
-        # 0001's S1 has 0 closed sections and 0 hole voxels on its own, while the sacrum
-        # below it has 47. Without the union S1 falls through to the watershed and the
-        # endplate line runs across the whole sacrum into the posterior elements.
-        ctx = None
-        if (level_name or "") == "S1":
-            from .labels import labels_for
-            sac = labels_for(lab_arr).get("sacrum")
-            if sac is not None and (lab_arr == sac).any():
-                sub, A2 = _crop_level(lab_arr, np.asarray(affine, float),
-                                      int(level_id), extra_ids=(int(sac),))
-                ctx = sub
-                sub = sub & _crop_level(lab_arr, np.asarray(affine, float),
-                                        int(level_id), extra_ids=(int(sac),),
-                                        only_id=int(level_id))[0]
-        if ctx is None:
-            sub, A2 = _crop_level(lab_arr, np.asarray(affine, float), int(level_id))
+        sub, A2, ctx, body = crop if crop is not None else _level_crop(
+            np.asarray(label), np.asarray(affine, float), int(level_id), level_name,
+            np.asarray(plan["up"], float), np.asarray(plan["direction"], float))
         if sub is None:
             return None
-        r = endplate_corners_body(sub, A2, which, sup_axis=up3, lr=d, canal_from=ctx)
+        r = endplate_corners_body(sub, A2, which, sup_axis=up3, lr=d,
+                                  canal_from=ctx, body=body)
         if r is None:
             return None
         res = (r[0], r[1], None, r[2])
@@ -430,10 +452,65 @@ def extend_to_cortex(p_a, p_b, footprint, **kw):
     projecting, because that separation does not survive the projection.
     """
     return p_a, p_b
+def _project_mask(mask, affine, plan):
+    """Detector footprint of a voxel mask, same geometry as `render`."""
+    idx = np.array(np.nonzero(np.asarray(mask, bool))).T
+    H, W = plan["shape"]
+    if not len(idx):
+        return np.zeros((H, W), bool)
+    sp = plan["pixel_spacing_mm"]
+    wpt = (np.c_[idx, np.ones(len(idx))] @ np.asarray(affine, float).T)[:, :3]
+    c = np.floor((wpt @ np.asarray(plan["right"], float) - plan["u0"]) / sp).astype(int)
+    r = (H - 1) - np.floor((wpt @ np.asarray(plan["up"], float) - plan["v0"]) / sp).astype(int)
+    ok = (c >= 0) & (c < W) & (r >= 0) & (r < H)
+    out = np.zeros((H, W), bool)
+    out[r[ok], c[ok]] = True
+    return out
+
+
+def extend_in_body(p_a, p_b, body_fp, *, band_px: float = 2.0, pct: float = 1.0):
+    """Run an endplate line out to the projected BODY's anterior and posterior edges.
+
+    The 3-D fit gives the corner midsagittally, but a lateral radiograph shows a
+    PROJECTION: the posterior vertebral body line a reader marks is the posterior
+    cortical margin of the silhouette, and the body's posterolateral parts project
+    further back than the midsagittal wall does. Marking the midsagittal wall on a
+    projected image therefore stops visibly short of the body outline -- which is exactly
+    what the overlay showed at L1-L3.
+
+    Only the ENDPOINTS move; the direction is the 3-D fitted one, so SS/LL/PI/PT are
+    untouched.
+
+    This is safe here for one reason: `body_fp` is the footprint of the ISOLATED body.
+    The same idea against a whole-vertebra footprint was the original failure -- the line
+    ran back through the pedicles into the lamina and spinous process, because in
+    projection the pedicles superimpose over the canal and the bone is continuous all the
+    way to the tip. With the posterior elements removed there is nothing to run to.
+    """
+    a = np.asarray(p_a, float)
+    b = np.asarray(p_b, float)
+    d = b - a
+    n = np.linalg.norm(d)
+    if n == 0 or body_fp is None or not body_fp.any():
+        return p_a, p_b
+    d = d / n
+    nrm = np.array([-d[1], d[0]])
+    ys, xs = np.nonzero(body_fp)
+    rel = np.stack([xs, ys], axis=1).astype(float) - a
+    near = rel[np.abs(rel @ nrm) <= band_px]
+    if len(near) < 4:
+        return p_a, p_b
+    t = near @ d
+    lo, hi = np.percentile(t, [pct, 100.0 - pct])      # percentile: ignore stray specks
+    lo, hi = min(lo, 0.0), max(hi, n)                  # never pull the corners inward
+    return (a + float(lo) * d), (a + float(hi) * d)
+
+
 def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
                         min_voxels: int = 50, ostk_path: str = None,
                         corner_params: dict = None, footprint=None,
-                        max_rms_mm: float = 4.0, rms_out: dict = None):
+                        max_rms_mm: float = 4.0, rms_out: dict = None,
+                        method: str = "body", bbox=None):
     """All FOUR corners of one vertebra -- both endplates -- in detector pixels.
 
         sup_ant  ---- sup_post      superior endplate
@@ -452,29 +529,40 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     Returns {"sup_ant": [x, y], ...} or None.
     """
     out = {}
-    try:
-        from ostk.masks import largest_component
-        _pts = _level_points_world(np.asarray(label), np.asarray(affine, float),
-                                   int(level_id), largest_component)
-    except Exception:                                      # noqa: BLE001
-        _pts = None
+    _pts = None
+    if method != "body":            # the body path never uses the point cloud
+        try:
+            from ostk.masks import largest_component
+            _pts = _level_points_world(np.asarray(label), np.asarray(affine, float),
+                                       int(level_id), largest_component)
+        except Exception:                                  # noqa: BLE001
+            _pts = None
     # S1 gets NO inferior endplate: it is fused to S2, so there is no disc space and no
     # inferior endplate to mark. Emitting one drew a line across the middle of the
     # sacrum, which is exactly as wrong as it looked.
     _sides = (("superior", ("sup_ant", "sup_post")),)
     if (level_name or "") != "S1":
         _sides = _sides + (("inferior", ("inf_ant", "inf_post")),)
+    _crop = _level_crop(np.asarray(label), np.asarray(affine, float), int(level_id),
+                        level_name, np.asarray(plan["up"], float),
+                        np.asarray(plan["direction"], float), bbox=bbox)
+    # footprint of the ISOLATED body -- the silhouette a reader would mark on a lateral
+    _body_fp = None
+    if method == "body" and _crop is not None and _crop[3] is not None:
+        _body_fp = _project_mask(_crop[3], _crop[1], plan)
     for which, keys in _sides:
         try:
             c = endplate_corners_2d(label, affine, plan, level_id, level_name=level_name,
                                     which=which, min_voxels=min_voxels, points=_pts,
-                                    return_rms=True,
+                                    return_rms=True, crop=_crop, method=method,
                                     ostk_path=ostk_path, corner_params=corner_params)
         except Exception:                                       # noqa: BLE001
             c = None
         if c is None:
             continue
         a, b, rms = c
+        if _body_fp is not None:
+            a, b = extend_in_body(a, b, _body_fp)
         if rms_out is not None:
             rms_out[which] = rms
         # DROP an endplate whose own plate fit did not converge. The residual separates

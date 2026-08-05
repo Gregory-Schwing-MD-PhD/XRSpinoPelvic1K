@@ -22,6 +22,7 @@ import json
 import os
 
 import numpy as np
+from scipy import ndimage
 
 from .drr import drr_project, projection_plan, to_uint8
 from .project_labels import (footprints_to_mask, project_footprints,
@@ -79,7 +80,7 @@ def _overmask_anchor_px(lab, aff, plan, level_name):
 def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma=0.55,
                        pixel_spacing_mm=1.0, yaw_deg=12.0, pitch_deg=8.0, roll_deg=6.0,
                        drop_ids=(), ostk_path=None, pi_anchor="corner",
-                       also_overmask=True):
+                       also_overmask=True, n_workers: int = 0):
     """N randomly-oblique lateral views of one CT, each with labels + endplate corners
     projected through the SAME geometry.
 
@@ -126,6 +127,8 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
                             bounds_world=bounds, pixel_spacing_mm=pixel_spacing_mm)
         drr = render(vol, aff, plan, gamma=gamma)
         fps = project_footprints(lab, aff, plan)
+        # every label's bounding box in ONE pass, reused by every level below
+        _boxes = ndimage.find_objects(lab.astype(np.int32))
         # Bicoxofemoral point: femoral-head CENTRES fitted in 3-D, then projected.
         # NOT the centroid of the femur footprint -- `femur_left/right` covers the whole
         # proximal femur including shaft and trochanter, so its centroid sits well below
@@ -159,25 +162,51 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
         # on spine radiographs, so this is directly comparable to corner-annotated real
         # datasets, and it gives every segmental disc angle for free.
         # median labelled-vertebra size in THIS scan, for the relative FOV test
-        _sizes = [int((lab == LABELS[n]).sum()) for n in CORNER_LEVELS
-                  if LABELS.get(n) is not None and (lab == LABELS[n]).any()]
+        # ONE pass for every level's voxel count, instead of `lab == lid` per level:
+        # that comparison sweeps all 158M voxels of a torso CT and it was being run
+        # twice per level just to decide whether the level qualifies.
+        _u, _c = np.unique(lab, return_counts=True)
+        _count = {int(a): int(b) for a, b in zip(_u, _c) if a}
+        _sizes = [_count[LABELS[n]] for n in CORNER_LEVELS
+                  if LABELS.get(n) is not None and LABELS[n] in _count]
         _med = float(np.median(_sizes)) if _sizes else 0.0
         corners = {}
         skipped = []
+        _todo = []
         for name in CORNER_LEVELS:
             lid = LABELS.get(name)
-            if lid is None or not (lab == lid).any():
+            if lid is None or lid not in _count:
                 continue
-            n_vox = int((lab == lid).sum())
+            n_vox = _count[lid]
             if n_vox < MIN_LEVEL_VOXELS or (_med and n_vox < MIN_LEVEL_FRACTION * _med):
                 skipped.append((name, n_vox))       # FOV-truncated: not an endplate
                 continue
+            _todo.append((name, lid))
+
+        # Levels are independent -- each crops its own vertebra, isolates its own body
+        # and fits its own plates -- so they run concurrently. Threads rather than
+        # processes: the cost is inside scipy.ndimage (fill-holes, label, EDT) and numpy
+        # linear algebra, which release the GIL, while processes would have to pickle a
+        # multi-hundred-MB label volume to every worker.
+        def _one(item):
+            name, lid = item
             try:
-                c4 = vertebra_corners_2d(lab, aff, plan, lid, level_name=name,
-                                         ostk_path=ostk_path,
-                                         footprint=fps.get(lid))
+                return name, vertebra_corners_2d(
+                    lab, aff, plan, lid, level_name=name, ostk_path=ostk_path,
+                    footprint=fps.get(lid),
+                    bbox=(_boxes[lid - 1] if lid - 1 < len(_boxes) else None))
             except Exception:                             # noqa: BLE001
-                c4 = None
+                return name, None
+
+        if n_workers and n_workers > 1 and len(_todo) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=int(n_workers)) as ex:
+                _results = list(ex.map(_one, _todo))
+        else:
+            _results = [_one(t) for t in _todo]
+
+        for name, c4 in _results:
+            lid = LABELS[name]
             if not c4:
                 continue
             # the alternative PI anchor, kept alongside so the convention stays a
