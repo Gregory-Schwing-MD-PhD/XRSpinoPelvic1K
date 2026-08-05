@@ -585,15 +585,37 @@ def extend_in_body(p_a, p_b, body_fp, *, wall_frac=(0.20, 0.80), thresh_px: floa
 
     out_t = [0.0, n]
     for i, rows_t in enumerate((rows_lo, rows_hi)):
-        fit = _ransac_line_1d(rows_s, rows_t, thresh_px=thresh_px)
-        if fit is None:
-            continue
-        m, c = fit
-        cand = c                          # the wall extrapolated to the plate (s = 0)
+        cand = None
+        # A vertebral wall is WAISTED -- narrowest at mid-height, widest at the rims --
+        # so a straight line fitted over the mid-body and extrapolated to the plate
+        # under-reaches by exactly that concavity. Measured against BUU readers, doing it
+        # straight put the span/height aspect at 1.1-1.2 where readers sit at 1.3-1.4,
+        # i.e. ~10-15% short: real body was being cut, not osteophyte. A degree-2 profile
+        # carries the waisting; as with the endplate it still cannot represent a spur, so
+        # Tukey weighting keeps the osteophyte excluded.
+        prof = _fit_profile_2d(rows_s, rows_t, degree=2)
+        if prof is not None:
+            cand = float(np.polyval(prof, 0.0))
+        if cand is None:
+            fit = _ransac_line_1d(rows_s, rows_t, thresh_px=thresh_px)
+            if fit is None:
+                continue
+            cand = fit[1]
         base = out_t[i]
         if abs(cand - base) <= max_extend_px:   # refuse an absurd extrapolation
             out_t[i] = cand
     return (a + float(out_t[0]) * d), (a + float(out_t[1]) * d)
+
+
+def _fit_profile_2d(s_arr, t_arr, *, degree=2):
+    """Robust polynomial t(s) via ostk's Tukey IRLS; returns coeffs or None."""
+    try:
+        from ostk.vertebral_body import fit_profile_robust
+    except Exception:                                     # noqa: BLE001
+        return None
+    out = fit_profile_robust(np.asarray(s_arr, float), np.asarray(t_arr, float),
+                             degree=degree, min_points=5)
+    return None if out is None else out[0]
 
 
 def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str = None,
