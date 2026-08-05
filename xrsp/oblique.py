@@ -596,6 +596,13 @@ def extend_in_body(p_a, p_b, body_fp, *, wall_frac=(0.20, 0.80), thresh_px: floa
         prof = _fit_profile_2d(rows_s, rows_t, degree=2)
         if prof is not None:
             cand = float(np.polyval(prof, 0.0))
+            # A quadratic evaluated at s = 0 EXTRAPOLATES beyond the band it was fitted
+            # on, and a quadratic extrapolates fast: it was carrying the anterior corner
+            # past the vertebra entirely. The body silhouette is a hard bound -- a corner
+            # cannot lie outside the bone -- so clamp to the footprint's own extent along
+            # this line. The model still supplies the waisting correction inside that.
+            t_lo, t_hi = float(t_all.min()), float(t_all.max())
+            cand = float(np.clip(cand, t_lo, t_hi))
         if cand is None:
             fit = _ransac_line_1d(rows_s, rows_t, thresh_px=thresh_px)
             if fit is None:
