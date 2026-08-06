@@ -75,6 +75,9 @@ def main(argv=None):
                     help="random in-plane rotation. Makes the DETECTOR robust to a tilted "
                          "film -- it does NOT make SS/PT valid on one, since both are "
                          "measured against true vertical.")
+    ap.add_argument("--buu_splits", default=None,
+                    help="splits.json from make_buu_splits.py. Strongly preferred over "
+                         "the seed-derived split.")
     ap.add_argument("--resume", default=None, help="checkpoint to resume (preemption)")
     a = ap.parse_args(argv)
     if not a.drr and not a.buu:
@@ -108,8 +111,29 @@ def main(argv=None):
 
     d_tr, d_va, d_te = split_by_subject(drr_rows, a.val_frac, a.test_frac, a.seed) \
         if drr_rows else ([], [], [])
-    b_tr, b_va, b_te = split_by_subject(buu_rows, a.val_frac, a.test_frac, a.seed) \
-        if buu_rows else ([], [], [])
+    if a.buu_splits and buu_rows:
+        # Read the assignment from disk. Deriving it from a seed reproduces a split only
+        # while the file list is byte-identical, so re-extracting the dataset can move a
+        # held-out case into training without anything complaining.
+        sp = json.load(open(a.buu_splits))
+        assign = sp["assignments"]
+        missing = [r["case"] for r in buu_rows if r["case"] not in assign]
+        if missing:
+            sys.exit(f"{len(missing)} BUU films are absent from {a.buu_splits} "
+                     f"(e.g. {missing[:3]}). The split file and the data on disk "
+                     f"disagree -- regenerate it with make_buu_splits.py rather than "
+                     f"training against a partial assignment.")
+        b_tr = [r for r in buu_rows if assign[r["case"]] == "train"]
+        b_va = [r for r in buu_rows if assign[r["case"]] == "val"]
+        b_te = [r for r in buu_rows if assign[r["case"]] == "test"]
+        print(f"BUU split read from {a.buu_splits} "
+              f"(seed {sp.get('seed')}, stratified by sex x age band)")
+    else:
+        if buu_rows:
+            print("WARNING: no --buu_splits; deriving the split from --seed. That is "
+                  "reproducible only while the file list is unchanged.", flush=True)
+        b_tr, b_va, b_te = split_by_subject(buu_rows, a.val_frac, a.test_frac, a.seed) \
+            if buu_rows else ([], [], [])
     print(f"DRR {len(drr_rows)} views -> {len(d_tr)}/{len(d_va)}/{len(d_te)}")
     print(f"BUU {len(buu_rows)} films -> {len(b_tr)}/{len(b_va)}/{len(b_te)}")
     print(f"levels ({len(levels)}): {' '.join(levels)}")
@@ -135,6 +159,7 @@ def main(argv=None):
     json.dump({"levels": levels, "names": names, "size": list(size),
                "drr_test": [r["case"] for r in d_te],
                "buu_test": [r["case"] for r in b_te],
+               "buu_splits_file": a.buu_splits,
                "args": vars(a)},
               open(os.path.join(a.out, "run_config.json"), "w"), indent=2)
     dl_va = DataLoader(ds_va, batch_size=a.batch, collate_fn=collate)

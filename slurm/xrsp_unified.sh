@@ -31,7 +31,8 @@
 source "${SLURM_SUBMIT_DIR:-$(pwd)}/slurm/_common.sh"
 
 DRR="${DRR:-/data/xrsp1k}"
-BUU="${BUU:-/data/BUU-LSPINE_400}"
+BUU="${BUU:-/data/BUU-LSPINE}"
+BUU_SPLITS="${BUU_SPLITS:-/data/buu_splits.json}"
 RUN_DIR="${RUN_DIR:-/data/runs/unified}"
 EPOCHS="${EPOCHS:-150}"
 BATCH="${BATCH:-8}"
@@ -42,9 +43,16 @@ if [[ -f "${DATA_ROOT}/runs/unified/last.pt" ]]; then
     echo "resuming from ${RUN_DIR}/last.pt"
 fi
 
+# The split must EXIST before training: deriving it inside the trainer ties the
+# assignment to the file list, so a re-extract could move a test case into train.
+if [[ ! -f "${DATA_ROOT}/buu_splits.json" ]]; then
+    echo "ERROR: ${DATA_ROOT}/buu_splits.json missing -- run 'make buu-splits' first" >&2
+    exit 1
+fi
+
 banner "unified landmark model  (${EPOCHS} epochs)"
 xrun --nv python scripts/train_unified.py \
     --drr "${DRR}" --buu "${BUU}" --out "${RUN_DIR}" \
-    --epochs "${EPOCHS}" --batch "${BATCH}" ${RESUME}
+    --buu_splits "${BUU_SPLITS}" \n    --epochs "${EPOCHS}" --batch "${BATCH}" ${RESUME}
 
 echo "[unified] done $(date)"

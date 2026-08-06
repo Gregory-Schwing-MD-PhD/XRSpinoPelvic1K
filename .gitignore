@@ -14,3 +14,19 @@ data/xrsp1k/
 # source CT volumes (licensed elsewhere; do not commit)
 *_ct.nii.gz
 *_label.nii.gz
+
+# ---- data archives and downloads: NEVER commit these -------------------------
+# `git add -A` in this directory swept a 4 GB dataset2024.zip into a commit and
+# took .git from ~20 MB to 3.9 GB. Third-party datasets are inputs staged by
+# scripts/fetch_buu.py, not repo contents -- and BUU is not redistributable here.
+*.zip
+*.crdownload
+*.part
+data/BUU-LSPINE/
+data/BUU-LSPINE_400/
+data/*.nii.gz
+data/runs/
+results/
+runs/
+# large PDFs dropped in while reading
+*.pdf

@@ -14,7 +14,8 @@ N_VIEWS        ?= 8
 EPOCHS         ?= 200
 FOLD           ?= 0
 OSTK_REF       ?= main
-BUU            ?= ../CTSpinoPelvic1K-1/BUU-LSPINE_400
+BUU            ?= /data/BUU-LSPINE        # container path; host = $(DATA)/BUU-LSPINE
+BUU_SPLITS     ?= /data/buu_splits.json
 BUU_ZIP        ?= BUU-LSPINE_400.zip
 
 .PHONY: help image container generate splits train train-fold eval eval-buu \
@@ -71,8 +72,11 @@ buu:  ## Stage + verify BUU-LSpine from a local archive (NOT redistributed here)
 buu-check:  ## Verify an existing BUU tree before burning grid time on it
 	python scripts/fetch_buu.py --check $(BUU)
 
+buu-splits:  ## Write the BUU train/val/test split ONCE (grouped + stratified)
+	python scripts/make_buu_splits.py --buu $(BUU) --out $(BUU_SPLITS)
+
 unified:  ## GRID: train the unified model (hip from DRRs, corners from BUU)
-	EPOCHS=$(EPOCHS) BUU=$(BUU) sbatch slurm/xrsp_unified.sh
+	EPOCHS=$(EPOCHS) BUU=$(BUU) BUU_SPLITS=$(BUU_SPLITS) sbatch slurm/xrsp_unified.sh
 
 femhead:  ## GRID: train the femoral-head segmenter (alternative hip route)
 	sbatch slurm/xrsp_femhead.sh
