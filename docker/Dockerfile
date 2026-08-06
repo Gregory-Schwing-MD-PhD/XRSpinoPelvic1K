@@ -56,10 +56,17 @@ RUN pip install --no-cache-dir "wandb>=0.12.10"
 # is 26–32° wrong at every slab fraction, because the ala superimposes on the S1
 # body in projection. This dependency is therefore load-bearing, not convenience.
 # Pin for anything you intend to publish -- the 3-D endplate fit determines every label.
-# 09dd9c5 is the first commit where main carries ostk.drr + ostk.project2d (PR #5 merged)
-# AND the shared spine.pi_anchor_point, so the corner-midpoint PI convention is the
-# default and CT- and XR-derived PI agree.
-ARG OSTK_REF=09dd9c5
+#
+# FLOOR: f9e23d3 is where OpenSpineToolkit first became pip-installable. Before it the
+# repo had no setup.py and no pyproject.toml, so this step failed at EVERY ref with
+# "does not appear to be a Python project" -- including the 09dd9c5 that used to be the
+# default here. A pin older than f9e23d3 cannot build, and the error names the ref
+# rather than the missing package spec, which reads like a bad sha. It is not.
+#
+# f9e23d3 also carries the endplate work that 09dd9c5 predates: the body-isolation fit,
+# the robust (Tukey) endplate profile, the perpendicular plate band, and the medial-band
+# restriction that keeps the sacral ala out of the S1 fit.
+ARG OSTK_REF=f9e23d3
 RUN pip install --no-cache-dir \
         "git+https://github.com/Gregory-Schwing-MD-PhD/OpenSpineToolkit.git@${OSTK_REF}"
 
@@ -79,10 +86,15 @@ print(f'torch={torch.__version__} monai={monai.__version__} lightning={pl.__vers
 BasicUNet(spatial_dims=2, in_channels=1, out_channels=8, features=(8,8,8,8,8,8)); \
 print('BasicUNet 2-D: OK')"
 
+# NO `|| echo WARNING` here. This check used to swallow its own failure, which
+# contradicts the heading four lines up: a warning scrolls past in a 10 GB build and
+# the image ships anyway, so the first thing to notice that ostk is missing is a grid
+# job that dies after queueing. ostk is not optional -- it IS the labels -- so a broken
+# import must fail the build.
 RUN python3 -c "\
 import ostk; from ostk.spine import endplate_corners, corner_params_for_level; \
 from ostk.labels import LABELS; \
-print('ostk OK — endplate_corners + corner_params_for_level available')" \
-    || echo 'WARNING: ostk import failed — corner extraction will not work'
+from ostk.vertebral_body import endplate_corners_body, body_mask_by_canal; \
+print('ostk OK — endplate_corners + corner_params_for_level + vertebral_body available')"
 
 ENTRYPOINT ["/bin/bash"]
