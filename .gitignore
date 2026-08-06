@@ -30,3 +30,6 @@ results/
 runs/
 # large PDFs dropped in while reading
 *.pdf
+
+# build_and_push.sh keeps this on failure so the error survives the scrollback
+build.log

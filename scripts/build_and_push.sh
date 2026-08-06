@@ -87,16 +87,28 @@ _build() {
 # Layers report CACHED while the snapshot chain beneath them is gone. It is not a
 # Dockerfile problem and re-running does not fix it -- the cache has to be dropped. So
 # retry once automatically instead of making that the user's problem.
-_log_tmp="$(mktemp)"
+# The log is kept at a STABLE path and deleted only on success. It used to go to a
+# mktemp that was rm'd on every exit path including failure, which threw away the one
+# artefact worth having: a 10 GB build emits thousands of lines, a terminal scrollback
+# truncates, and the pip resolver prints the actual conflict once, early, far above the
+# final error. Losing it means rebuilding just to read it.
+_log_tmp="${HERE}/build.log"
+_fail() {
+    echo "[ERROR] $*" >&2
+    echo "         full build log: ${_log_tmp}" >&2
+    echo "         the cause is usually well above the last line; try:" >&2
+    echo "           grep -n -i -m20 -E 'ERROR|error:|Cannot install|conflict|Failed building' ${_log_tmp}" >&2
+    exit 1
+}
+
 if ! _build 2>&1 | tee "${_log_tmp}"; then
     if grep -q "parent snapshot .* does not exist" "${_log_tmp}"; then
         log "BuildKit cache is inconsistent (stale parent snapshot). Pruning, then"
         log "rebuilding with --no-cache. This restarts from the base image."
         docker builder prune -af >/dev/null 2>&1 || true
-        _build --no-cache 2>&1 | tee "${_log_tmp}" || { rm -f "${_log_tmp}"; die "build failed after cache prune."; }
+        _build --no-cache 2>&1 | tee "${_log_tmp}" || _fail "build failed after cache prune."
     else
-        rm -f "${_log_tmp}"
-        die "build failed (see output above)."
+        _fail "build failed."
     fi
 fi
 rm -f "${_log_tmp}"
