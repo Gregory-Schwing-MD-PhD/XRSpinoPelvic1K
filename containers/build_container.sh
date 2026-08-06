@@ -15,7 +15,8 @@
 #
 # Overrides:
 #   BUILDER=singularity|apptainer   (default: auto-detect)
-#   DOCKERHUB_USER=<user>           (default: gregoryschwingmdphd)
+#   DOCKERHUB_USER=<user>           (default: go2432 -- the Docker Hub account;
+#                                   NOT gregoryschwingmdphd, which is the HF name)
 #   IMAGE=<name>                    (default: xrspinopelvic)
 #   TAG=<tag>                       (default: latest)
 #   OUTPUT=<path>                   (default: containers/xrspinopelvic.sif)
@@ -23,7 +24,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOCKERHUB_USER="${DOCKERHUB_USER:-gregoryschwingmdphd}"
+DOCKERHUB_USER="${DOCKERHUB_USER:-go2432}"
 IMAGE="${IMAGE:-xrspinopelvic}"
 TAG="${TAG:-latest}"
 DOCKER_URI="docker://${DOCKERHUB_USER}/${IMAGE}:${TAG}"

@@ -16,7 +16,11 @@
 # =============================================================================
 set -euo pipefail
 
-DOCKERHUB_USER="${DOCKERHUB_USER:-gregoryschwingmdphd}"
+# go2432, NOT gregoryschwingmdphd. The latter is the HuggingFace username and, confusingly,
+# also an empty Docker Hub account that exists -- so it looks right, resolves, and then
+# rejects the push with "insufficient_scope" because you can only push to a namespace you
+# are logged in to. Every other image (spine-level-ai-*, lstv-*) lives under go2432.
+DOCKERHUB_USER="${DOCKERHUB_USER:-go2432}"
 IMAGE_NAME="${IMAGE_NAME:-xrspinopelvic}"
 TAG="${TAG:-latest}"
 PUSH="${PUSH:-1}"
@@ -45,12 +49,30 @@ fi
 
 # Verify the login BEFORE a ~10 GB build. Docker only rejects an unauthenticated push at
 # the very end, so without this the failure arrives after the expensive part.
+# Checking only that SOME login exists is not enough -- being logged in as the wrong
+# account fails exactly as late and as expensively as not being logged in at all. Docker
+# Hub permits pushes only to your own namespace, so the logged-in user must EQUAL
+# DOCKERHUB_USER. A mismatch surfaces as "insufficient_scope: authorization failed" after
+# the push has already uploaded nothing and the build has already cost 14 GB and ~20
+# minutes, and it reads like a permissions problem on the repo rather than a name
+# mismatch. Compare the two here, before any of that.
 if [[ "${PUSH}" == "1" ]]; then
-    if ! docker system info 2>/dev/null | grep -q "Username:"; then
+    _who="$(docker system info 2>/dev/null | sed -n 's/^ *Username: *//p' | head -1)"
+    if [[ -z "${_who}" ]]; then
         log "WARNING: no Docker Hub login detected. Push will fail after the build."
         log "         Run 'docker login' now, or re-run with PUSH=0."
         read -r -p "         Continue anyway? [y/N] " _yn
         [[ "${_yn}" =~ ^[Yy]$ ]] || exit 1
+    elif [[ "${_who}" != "${DOCKERHUB_USER}" ]]; then
+        echo "[ERROR] logged in to Docker Hub as '${_who}', but this build targets" >&2
+        echo "        '${DOCKERHUB_USER}/${IMAGE_NAME}'. You can only push to your own" >&2
+        echo "        namespace, so the push WILL be denied after the build." >&2
+        echo "" >&2
+        echo "        Either:  DOCKERHUB_USER=${_who} $0" >&2
+        echo "        or:      docker login -u ${DOCKERHUB_USER}" >&2
+        exit 1
+    else
+        log "docker hub  : logged in as ${_who} (matches target namespace)"
     fi
 fi
 
