@@ -16,14 +16,20 @@
 # =============================================================================
 set -euo pipefail
 
-# TWO Docker Hub accounts exist and both are real:
-#   gregoryschwingmdphd -> this project's images (ctspinopelvic1k, ctspinopelvic1k-ts,
-#                          spinesurg-ct*). xrspinopelvic belongs HERE.
-#   go2432              -> older work (gomc, namd, deepchem, lstv-*, spine-level-ai-*)
-# A push is only permitted into the namespace you are logged in to, so being logged in
-# as go2432 while targeting this one fails with "insufficient_scope" -- which reads like
-# a repo permission problem rather than the wrong account. The preflight below checks it.
-DOCKERHUB_USER="${DOCKERHUB_USER:-gregoryschwingmdphd}"
+# TWO Docker Hub accounts are in play and both are real:
+#   go2432              -> where the workstation is logged in, and where
+#                          xrspinopelvic:latest is actually published (public, amd64).
+#   gregoryschwingmdphd -> the rest of the project (ctspinopelvic1k, ctspinopelvic1k-ts,
+#                          spinesurg-ct*). Also the HuggingFace username, which is why
+#                          the two get mixed up.
+#
+# The default is go2432 because that is where the image IS and where pushes succeed
+# without a login dance. Consolidating everything under gregoryschwingmdphd is a
+# reasonable tidy-up, but it costs a 14 GB re-push and must be done in BOTH this file
+# and containers/build_container.sh at once -- if the two disagree the build publishes
+# to one namespace and the grid pulls from the other, which fails as "manifest unknown"
+# on the grid rather than as anything visible here.
+DOCKERHUB_USER="${DOCKERHUB_USER:-go2432}"
 IMAGE_NAME="${IMAGE_NAME:-xrspinopelvic}"
 TAG="${TAG:-latest}"
 PUSH="${PUSH:-1}"

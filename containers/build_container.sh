@@ -9,14 +9,14 @@
 # Prerequisites on the grid:
 #   - apptainer or singularity available (try: module load apptainer)
 #   - outbound network from the login node
-#   - ~12 GB free disk
+#   - ~40 GB free disk (14.1 GB image; layers + rootfs + .sif coexist during convert)
 #
 # Usage:   bash containers/build_container.sh
 #
 # Overrides:
 #   BUILDER=singularity|apptainer   (default: auto-detect)
-#   DOCKERHUB_USER=<user>           (default: gregoryschwingmdphd -- this project's
-#                                   Docker Hub namespace, alongside ctspinopelvic1k)
+#   DOCKERHUB_USER=<user>           (default: go2432 -- where the image is published;
+#                                   MUST match scripts/build_and_push.sh)
 #   IMAGE=<name>                    (default: xrspinopelvic)
 #   TAG=<tag>                       (default: latest)
 #   OUTPUT=<path>                   (default: containers/xrspinopelvic.sif)
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOCKERHUB_USER="${DOCKERHUB_USER:-gregoryschwingmdphd}"
+DOCKERHUB_USER="${DOCKERHUB_USER:-go2432}"
 IMAGE="${IMAGE:-xrspinopelvic}"
 TAG="${TAG:-latest}"
 DOCKER_URI="docker://${DOCKERHUB_USER}/${IMAGE}:${TAG}"
@@ -69,7 +69,7 @@ else
 fi
 log "builder: ${BUILDER}  ($(${BUILDER} --version 2>&1 | head -1))"
 
-# Cache and tmp OFF /tmp: converting a ~10 GB image blows past a small /tmp and the
+# Cache and tmp OFF /tmp: converting a 14 GB image blows past a small /tmp and the
 # failure wastes the whole pull. /scratch is used when it exists, but this grid has no
 # /scratch -- an unconditional default there silently created the directory under a path
 # nobody watches, or failed outright. So probe, then fall back to $HOME.
