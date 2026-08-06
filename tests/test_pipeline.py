@@ -168,3 +168,92 @@ def test_segmental_angles_span_consecutive_levels():
     seg = M.segmental(pts, ["L1", "L2", "L3"])
     assert set(seg) == {"L1/L2", "L2/L3"}
     assert all(v is not None and v < 1e-6 for v in seg.values())
+
+
+# ---------------------------------------------------------------------------
+# BUU union loader
+# ---------------------------------------------------------------------------
+
+def _buu_root():
+    import os
+    r = r"C:/Users/grego/OneDrive/Desktop/CTSpinoPelvic1K-1/BUU-LSPINE_400"
+    return r if os.path.isdir(os.path.join(r, "LA")) else None
+
+
+def test_buu_corner_order_and_mirror():
+    """Anterior must survive the mirror, and the mirror must actually move x."""
+    import numpy as np
+    from xrsp.buu import load_corners, BUU_ROWS
+    import tempfile, os
+    rows = []
+    for i in range(len(BUU_ROWS)):
+        rows.append([100.0, 10.0 * i, 300.0, 10.0 * i + 5.0, 0])
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "c.csv")
+        np.savetxt(p, np.array(rows), delimiter=",")
+        raw = load_corners(p)
+        mir = load_corners(p, image_width=1000)
+    # anterior is BUU's FIRST point, and stays the anterior corner after mirroring
+    assert raw["L1.sup_ant"][0] == 100.0 and raw["L1.sup_post"][0] == 300.0
+    assert mir["L1.sup_ant"][0] == 899.0 and mir["L1.sup_post"][0] == 699.0
+    # mirroring must not move y
+    assert mir["L1.sup_ant"][1] == raw["L1.sup_ant"][1]
+    # after mirroring, anterior is at LARGER x -- the DRR convention
+    assert mir["L1.sup_ant"][0] > mir["L1.sup_post"][0]
+
+
+def test_buu_has_no_inferior_S1():
+    """S1 is fused to S2: BUU annotates S1a with no S1b, and so do we."""
+    from xrsp.buu import BUU_ROWS
+    assert ("S1", "sup") in BUU_ROWS
+    assert ("S1", "inf") not in BUU_ROWS
+
+
+def test_buu_rejects_truncated_annotation():
+    import numpy as np, tempfile, os
+    from xrsp.buu import load_corners
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "short.csv")
+        np.savetxt(p, np.zeros((4, 5)), delimiter=",")
+        assert load_corners(p) is None      # partial file must not look like missing points
+
+
+def test_buu_femoral_channel_is_masked_not_zeroed():
+    """The whole point of the union: unlabelled != absent."""
+    import numpy as np
+    from xrsp.heatmaps import FEMORAL_KEY, channel_names, gaussian_heatmaps
+    from xrsp.buu import BUU_LEVELS, load_corners
+    import tempfile, os
+    names = channel_names(BUU_LEVELS)
+    # points must lie INSIDE the heatmap; an out-of-frame landmark is masked too
+    rows = [[15.0, 5.0 + 10.0 * i, 45.0, 8.0 + 10.0 * i, 0] for i in range(11)]
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "c.csv")
+        np.savetxt(p, np.array(rows), delimiter=",")
+        pts = load_corners(p)
+    hm, valid = gaussian_heatmaps(pts, (128, 64), names=names)
+    fi = names.index(FEMORAL_KEY)
+    assert not bool(valid[fi]), "bicoxofemoral must be MASKED for a BUU sample"
+    assert bool(valid[names.index("L1.sup_ant")]), "annotated corners must be supervised"
+    assert bool(valid[names.index("S1.sup_ant")]), "S1 superior IS annotated by BUU"
+    assert not bool(valid[names.index("S1.inf_ant")]), "S1 has no inferior plate"
+
+
+def test_landmark_outside_the_frame_is_masked():
+    """A point off the image is unlabelled-here, not present-at-the-edge."""
+    import numpy as np
+    from xrsp.heatmaps import channel_names, gaussian_heatmaps
+    names = channel_names(["L1"])
+    hm, valid = gaussian_heatmaps({"L1.sup_ant": [500.0, 5.0]}, (64, 32), names=names)
+    assert not bool(valid[names.index("L1.sup_ant")])
+    assert float(np.abs(hm).max()) == 0.0
+
+
+def test_buu_index_finds_the_real_dataset():
+    root = _buu_root()
+    if root is None:
+        return
+    from xrsp.buu import index_buu
+    rows = index_buu(root)
+    assert len(rows) == 400
+    assert all(r["img"].endswith(".jpg") and r["csv"].endswith(".csv") for r in rows)
