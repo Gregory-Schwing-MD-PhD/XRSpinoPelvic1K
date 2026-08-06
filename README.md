@@ -14,6 +14,81 @@ Built on [CTSpinoPelvic1K](https://github.com/Gregory-Schwing-MD-PhD/CTSpinoPelv
 
 ---
 
+## Endplate corners and spinopelvic parameters
+
+Every level that is visible gets **four corners** — the two ends of its superior and its
+inferior endplate — plus a bicoxofemoral point, so PI, SS, PT and LL follow directly.
+S1 gets a superior endplate only: it is fused to S2, so there is no inferior plate to
+mark. (BUU-LSpine's radiologists annotate `S1a` with no `S1b` for the same reason.)
+
+![Lateral DRR, case 0001](docs/figures/drr_0001.png)
+
+![Lateral DRR, case 0003](docs/figures/drr_0003.png)
+
+*Orange = endplate lines through the fitted corners; cyan = the four corners per level;
+red = the PI construction, from the S1 endplate midpoint to the bicoxofemoral axis.
+Both cases carry the PI identity `|SS + PT − PI| ≤ 0.001°`.*
+
+### How the corners are found
+
+Corners come from the **3-D mask**, then project — never from the 2-D silhouette. That
+is not a preference: fitting the S1 endplate from the silhouette is **26–32° wrong at
+every slab fraction**, because the sacral ala superimposes on the S1 body and no amount
+of 2-D reasoning separates them. Fitted in 3-D and projected, the same endplate lands
+within ~0.6°. This is the whole reason the dataset is generated from CT.
+
+The construction follows the radiographic literature rather than being invented here:
+
+| step | method | source |
+|---|---|---|
+| isolate the vertebral **body** | spinal canal as separator (a topological hole per axial section); distance-transform watershed as fallback | Yao ISBI 2006; Naegel 2007 |
+| body coordinate system | posterior wall = the canal's anterior edge, per section | Mastmeyer *Med Image Anal* 2006 |
+| endplate + wall profiles | robust degree-2 model under Tukey IRLS — one concavity only, so a spur or a Schmorl's node cannot be represented and gets zero weight | Štern *Phys Med Biol* 2011; Roberts *Invest Radiol* 2006; de Bruijne *Med Image Anal* 2007 |
+| corner | endplate tangent ∩ cortical wall, not the extreme voxel | Frobin *Clin Biomech* 1997; Hurxthal *AJR* 1968 |
+| exclude osteophytes | they are outliers to both the plate and the wall | Genant *JBMR* 1993; Black *JBMR* 1995 |
+
+### What actually needs to be accurate
+
+Not every corner matters equally, and this is measurable. Sliding every corner ±2.5 mm
+**along its own endplate line** (direction preserved — the error mode that actually
+occurs) gives:
+
+```
+perturb every corner EXCEPT S1 :  SS 0.000  LL 0.000  PI 0.000  PT 0.000
+perturb ONLY S1                :  SS 0.000  LL 0.000  PI 0.589  PT 0.589
+```
+
+**SS and LL are exactly invariant** — both are angles between *lines*, and sliding an
+endpoint along a line does not move the line. PI and PT depend on S1 only through the
+plate **midpoint**, so symmetric corner error cancels there too. Of ~20 corners in a
+case, **only S1's two affect any spinopelvic parameter**; the rest matter as landmark
+training labels.
+
+### Validation against real reader annotations
+
+`scripts/buu_convention.py` scores the generated corners against **BUU-LSpine 400** —
+reader-placed corners on real lateral radiographs. The two cannot be compared
+point-for-point (different patients, CT vs radiograph), so the comparison uses
+**scale-free** quantities: lordosis angles, the wedge between a vertebra's own two
+plates, endplate span / body height, and the S1 plate's length and angle relative to L5.
+
+```
+metric                BUU p5-p95     ours
+LL                    20.4 - 67.2    in band
+s1_vs_L5inf_deg        2.8 - 25.8    in band
+s1_vs_L1sup_deg       19.7 - 67.0    in band
+s1_over_L5sup          0.8 - 1.1     1.1   (was 1.5 before the ala fix)
+wedge_L5               0.4 - 10.6    13.6  OUT
+```
+
+**Known gaps.** `wedge_L5` sits outside the reader band across every revision so far, and
+the S1 plate is still marginally long. Upper-lumbar disc angles run lower than readers',
+which is expected and *not* corrected for: CTSpinoPelvic1K is **supine CT** and BUU is
+**standing radiography**, and lordosis unloads supine. Tuning that away would be fitting
+posture, not anatomy.
+
+---
+
 ## Why this exists
 
 | | radiograph-only labeling | **XRSpinoPelvic1K (DRR from CT)** |

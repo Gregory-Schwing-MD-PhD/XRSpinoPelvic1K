@@ -629,7 +629,7 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
                         min_voxels: int = 50, ostk_path: str = None,
                         corner_params: dict = None, footprint=None,
                         max_rms_mm: float = 4.0, rms_out: dict = None,
-                        method: str = "body", bbox=None):
+                        method: str = "body", bbox=None, medial_frac: float = 0.45):
     """All FOUR corners of one vertebra -- both endplates -- in detector pixels.
 
         sup_ant  ---- sup_post      superior endplate
@@ -668,7 +668,32 @@ def vertebra_corners_2d(label, affine, plan, level_id: int, *, level_name: str =
     # footprint of the ISOLATED body -- the silhouette a reader would mark on a lateral
     _body_fp = None
     if method == "body" and _crop is not None and _crop[3] is not None:
-        _body_fp = _project_mask(_crop[3], _crop[1], plan)
+        # Project only the MEDIAL BAND of the body. On the sacrum the alae superimpose on
+        # the S1 body in projection -- the very effect this dataset exists to model -- so
+        # a footprint of the whole body has wall margins that are ALA, not body, and the
+        # fitted walls sit far too far apart. Measured against BUU readers, who make the
+        # S1 endplate the same length as an L5 endplate (ratio 1.0, p5-p95 0.8-1.1), ours
+        # came out at 1.5-1.8: 50-80% too long, while both S1 ANGLES were already inside
+        # the reader band. Orientation was right; extent was not.
+        #
+        # The 3-D plate fit already restricts to a medial band for this reason
+        # (ostk.vertebral_body.endplate_corners_body, lat_frac); the projection step did
+        # not, so the two disagreed about what "the body" is.
+        _bm = _crop[3]
+        _A2 = _crop[1]
+        _idx = np.array(np.nonzero(_bm)).T
+        if len(_idx):
+            _w = (np.c_[_idx, np.ones(len(_idx))] @ np.asarray(_A2, float).T)[:, :3]
+            _lrv = _u(np.asarray(plan["direction"], float))
+            _lp = _w @ _lrv
+            _lo, _hi = np.quantile(_lp, [(1 - medial_frac) / 2, 1 - (1 - medial_frac) / 2])
+            _keep = (_lp >= _lo) & (_lp <= _hi)
+            if _keep.sum() >= 30:
+                _band = np.zeros_like(_bm)
+                _ii = _idx[_keep]
+                _band[_ii[:, 0], _ii[:, 1], _ii[:, 2]] = True
+                _bm = _band
+        _body_fp = _project_mask(_bm, _A2, plan)
     for which, keys in _sides:
         try:
             c = endplate_corners_2d(label, affine, plan, level_id, level_name=level_name,

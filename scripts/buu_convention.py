@@ -103,6 +103,28 @@ def case_metrics(c):
             m[f"aspect_{lv}"] = span / h        # A-P depth / height, dimensionless
     for a, b in zip(LEVELS, LEVELS[1:] + ["S1"]):
         m[f"disc_{a}{b}"] = cobb(c[(a, "inf")], c[(b, "sup")])
+
+    # --- the S1 plate specifically -------------------------------------------------
+    # S1 is the only endplate whose CORNERS affect a spinopelvic parameter: PI and PT
+    # depend on it through the plate MIDPOINT, and nothing else in the chain does (a
+    # perturbation test puts SS and LL at exactly 0.000 deg and every non-S1 corner at
+    # 0.000 for PI/PT too). So it is worth comparing on its own.
+    #
+    # PI is an ANGLE, so absolute position and image scale are irrelevant; what has to
+    # match the readers is the plate's SHAPE and ORIENTATION. Both are captured
+    # scale-free: its length relative to a lumbar endplate, and its angle relative to the
+    # vertebra above it. A sacral plate that is systematically too long or mis-angled
+    # shows up here even though ours is in mm and BUU's is in pixels.
+    s1 = c[("S1", "sup")]
+    s1_len = float(np.linalg.norm(s1[1] - s1[0]))
+    l5s = c[("L5", "sup")]
+    l5i = c[("L5", "inf")]
+    for nm, ref in (("s1_over_L5sup", l5s), ("s1_over_L5inf", l5i)):
+        rl = float(np.linalg.norm(ref[1] - ref[0]))
+        if rl > 1e-6:
+            m[nm] = s1_len / rl
+    m["s1_vs_L5inf_deg"] = cobb(l5i, s1)
+    m["s1_vs_L1sup_deg"] = cobb(c[("L1", "sup")], s1)
     return m
 
 
@@ -140,7 +162,8 @@ def main(argv=None):
         rows.append(case_metrics(c))
     print(f"BUU-LSpine lateral: {len(rows)} cases ({bad} unreadable)\n")
     KEYS = (["LL"] + [f"wedge_{l}" for l in LEVELS] + [f"aspect_{l}" for l in LEVELS]
-            + [f"disc_{a_}{b_}" for a_, b_ in zip(LEVELS, LEVELS[1:] + ["S1"])])
+            + [f"disc_{a_}{b_}" for a_, b_ in zip(LEVELS, LEVELS[1:] + ["S1"])]
+            + ["s1_over_L5sup", "s1_over_L5inf", "s1_vs_L5inf_deg", "s1_vs_L1sup_deg"])
     ref = summarize(rows, KEYS)
     if not a.ours:
         return 0
