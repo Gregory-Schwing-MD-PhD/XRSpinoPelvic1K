@@ -390,3 +390,72 @@ def test_ordering_violations_detect_flipped_corners():
     assert any("sup_ant_not_anterior" in v for v in mod.ordering_violations(flipped, names))
     upside = dict(good, **{"L1.sup_ant": [100, 99]})       # superior below inferior
     assert any("sup_below_inf" in v for v in mod.ordering_violations(upside, names))
+
+
+# ---------------------------------------------------------------------------
+# Orientation invariance
+# ---------------------------------------------------------------------------
+
+def _marked(H=64, W=48, x=11, y=7):
+    import numpy as np
+    im = np.zeros((H, W), np.float32)
+    im[y, x] = 1.0
+    return im, {"p": [float(x), float(y)]}
+
+
+def test_flip_moves_image_and_point_together():
+    import numpy as np
+    from xrsp.geom_aug import flip_lr
+    im, pts = _marked()
+    im2, p2 = flip_lr(im, pts)
+    ys, xs = np.nonzero(im2 > 0.5)
+    assert (float(xs[0]), float(ys[0])) == (p2["p"][0], p2["p"][1])
+    assert p2["p"][0] == im.shape[1] - 1 - 11
+
+
+def test_rotation_moves_image_and_point_together():
+    import numpy as np
+    from xrsp.geom_aug import rotate
+    im, pts = _marked(H=81, W=81, x=60, y=40)
+    for deg in (10.0, -25.0, 90.0):
+        im2, p2 = rotate(im, pts, deg, order=0)
+        ys, xs = np.nonzero(im2 > 0.5)
+        assert len(xs), f"marker lost at {deg} deg"
+        d = ((float(xs.mean()) - p2["p"][0]) ** 2 + (float(ys.mean()) - p2["p"][1]) ** 2) ** 0.5
+        assert d < 1.5, f"{deg} deg: point off by {d:.2f}px"
+
+
+def test_flip_does_not_swap_anatomical_channel_identity():
+    """`sup_ant` is the ANTERIOR corner -- an anatomical fact. Mirroring moves the point;
+    it must not rename the channel."""
+    from xrsp.geom_aug import flip_lr
+    import numpy as np
+    im = np.zeros((10, 100), np.float32)
+    pts = {"L1.sup_ant": [90.0, 5.0], "L1.sup_post": [30.0, 5.0]}
+    _, p2 = flip_lr(im, pts)
+    assert set(p2) == set(pts)                       # same channels
+    assert p2["L1.sup_ant"][0] == 9.0                # anterior now on the LEFT
+    assert p2["L1.sup_post"][0] == 69.0
+    assert p2["L1.sup_ant"][0] < p2["L1.sup_post"][0]
+
+
+def test_angles_between_lines_survive_flip_and_rotation():
+    """PI and LL are angles between lines, so they must be invariant. SS/PT are not --
+    they are measured against true vertical, which a rotation changes by construction."""
+    import numpy as np
+    from xrsp.geom_aug import flip_lr, rotate
+    im = np.zeros((200, 200), np.float32)
+    pts = {"a1": [40.0, 100.0], "a2": [160.0, 130.0],
+           "b1": [50.0, 40.0], "b2": [150.0, 40.0]}
+
+    def between(p):
+        u = np.array(p["a2"]) - np.array(p["a1"])
+        v = np.array(p["b2"]) - np.array(p["b1"])
+        cu, cv = u / np.linalg.norm(u), v / np.linalg.norm(v)
+        return float(np.degrees(np.arccos(abs(float(cu @ cv)))))
+
+    base = between(pts)
+    _, pf = flip_lr(im, pts)
+    _, pr = rotate(im, pts, 17.0)
+    assert abs(between(pf) - base) < 1e-6
+    assert abs(between(pr) - base) < 1e-6

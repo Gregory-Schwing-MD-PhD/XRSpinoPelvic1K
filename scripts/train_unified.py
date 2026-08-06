@@ -68,6 +68,13 @@ def main(argv=None):
     ap.add_argument("--test_frac", type=float, default=0.15)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--p_flip", type=float, default=0.5,
+                    help="P(left-right flip). Makes the model indifferent to which way "
+                         "the patient faced; 0 disables.")
+    ap.add_argument("--max_rot_deg", type=float, default=8.0,
+                    help="random in-plane rotation. Makes the DETECTOR robust to a tilted "
+                         "film -- it does NOT make SS/PT valid on one, since both are "
+                         "measured against true vertical.")
     ap.add_argument("--resume", default=None, help="checkpoint to resume (preemption)")
     a = ap.parse_args(argv)
     if not a.drr and not a.buu:
@@ -113,7 +120,8 @@ def main(argv=None):
 
     ds_va, names = build_union(d_va, b_va, levels=levels, out_size=size,
                                sigma=a.sigma_end, augment=False, seed=a.seed,
-                               drr_weight=1, buu_weight=1)
+                               drr_weight=1, buu_weight=1,
+                               p_flip=0.0, max_rot_deg=0.0)   # val is never augmented
     net = build_unet(len(names), features=(16, 32, 64, 128, 256)).to(dev)
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr)
     start_ep, best = 0, float("inf")
@@ -138,7 +146,8 @@ def main(argv=None):
         sig = a.sigma_start + t * (a.sigma_end - a.sigma_start)
         ds_tr, _ = build_union(d_tr, b_tr, levels=levels, out_size=size, sigma=sig,
                                augment=True, seed=a.seed + ep,
-                               drr_weight=a.drr_weight, buu_weight=a.buu_weight)
+                               drr_weight=a.drr_weight, buu_weight=a.buu_weight,
+                               p_flip=a.p_flip, max_rot_deg=a.max_rot_deg)
         dl_tr = DataLoader(ds_tr, batch_size=a.batch, shuffle=True, collate_fn=collate)
         net.train()
         tl, nb = 0.0, 0

@@ -75,7 +75,8 @@ def hip_channels(names: Sequence[str]) -> List[str]:
 
 def build_union(drr_rows, buu_rows, *, levels, out_size=(512, 256), sigma=3.0,
                 augment=True, seed=0, drr_weight=1, buu_weight=1,
-                drr_supervises="hip", buu_supervises="corners"):
+                drr_supervises="hip", buu_supervises="corners",
+                p_flip=0.5, max_rot_deg=0.0):
     """DRR + BUU as one dataset with disjoint supervision. Returns (dataset, names).
 
     `drr_supervises` / `buu_supervises` take "hip", "corners" or "all". The defaults are
@@ -94,10 +95,16 @@ def build_union(drr_rows, buu_rows, *, levels, out_size=(512, 256), sigma=3.0,
     if drr_rows:
         drr_ds = LandmarkDRRDataset(drr_rows, out_size=out_size, levels=list(levels),
                                     sigma=sigma, augment=augment, seed=seed)
+        # ORIENTATION INVARIANCE: the DRRs are rendered anterior-right and BUU films are
+        # anterior-left, so without a random flip the model would just memorise one
+        # handedness and fail on the other. `sup_ant` stays the ANTERIOR corner under the
+        # flip -- anatomy, not image side -- so only the coordinate mirrors.
+        drr_ds.p_flip, drr_ds.max_rot_deg = p_flip, max_rot_deg
         drr_ds = SupervisionMask(drr_ds, names, sel[drr_supervises])
     if buu_rows:
         buu_ds = BUULandmarkDataset(buu_rows, levels=list(levels), out_size=out_size,
-                                    sigma=sigma, augment=augment, seed=seed)
+                                    sigma=sigma, augment=augment, seed=seed,
+                                    p_flip=p_flip, max_rot_deg=max_rot_deg)
         buu_ds = SupervisionMask(buu_ds, names, sel[buu_supervises])
 
     from .buu import UnionDataset

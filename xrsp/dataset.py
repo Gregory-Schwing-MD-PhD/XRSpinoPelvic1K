@@ -107,6 +107,14 @@ class LandmarkDRRDataset:
             img = zoom(img, (sy, sx), order=1)
             pts = {k: (None if v is None else [v[0] * sx, v[1] * sy]) for k, v in pts.items()}
         if self.augment:
+            # ORIENTATION first, then appearance -- see xrsp.geom_aug. A flip is what
+            # makes the model indifferent to which way the patient faced; the DRRs are
+            # rendered anterior-right and BUU is anterior-left, and without this the
+            # model would simply memorise one handedness.
+            from .geom_aug import augment_orientation
+            img, pts = augment_orientation(img, pts, self._rng,
+                                           p_flip=getattr(self, "p_flip", 0.5),
+                                           max_rot_deg=getattr(self, "max_rot_deg", 0.0))
             img = self._appearance(img)
         hm, valid = gaussian_heatmaps(pts, (H, W), sigma=self.sigma, names=self.names)
         return (torch.from_numpy(img[None].astype(np.float32)),

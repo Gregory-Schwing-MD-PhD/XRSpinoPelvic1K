@@ -123,7 +123,8 @@ class BUULandmarkDataset:
 
     def __init__(self, rows: Sequence[Dict], *, levels: Sequence[str],
                  out_size=(512, 256), sigma: float = 3.0, augment: bool = False,
-                 seed: int = 0, femoral_csv: Optional[str] = None, mirror: bool = True):
+                 seed: int = 0, femoral_csv: Optional[str] = None, mirror: bool = True,
+                 p_flip: float = 0.5, max_rot_deg: float = 0.0):
         self.rows = list(rows)
         self.levels = list(levels)
         self.names = channel_names(self.levels)
@@ -132,6 +133,8 @@ class BUULandmarkDataset:
         self.augment = bool(augment)
         self.femoral_csv = femoral_csv
         self.mirror = bool(mirror)
+        self.p_flip = float(p_flip)
+        self.max_rot_deg = float(max_rot_deg)
         self._rng = np.random.default_rng(seed)
 
     def __len__(self):
@@ -173,6 +176,13 @@ class BUULandmarkDataset:
             img = zoom(img, (sy, sx), order=1)
             pts = {k: [v[0] * sx, v[1] * sy] for k, v in pts.items()}
         if self.augment:
+            # ORIENTATION first, then appearance. Both the film's handedness and any
+            # rotation move the LANDMARKS, so they have to be applied where the points
+            # are still explicit -- after the heatmaps are rendered it is too late.
+            from .geom_aug import augment_orientation
+            img, pts = augment_orientation(img, pts, self._rng,
+                                           p_flip=self.p_flip,
+                                           max_rot_deg=self.max_rot_deg)
             img = self._appearance(img)
         hm, valid = gaussian_heatmaps(pts, (H, W), sigma=self.sigma, names=self.names)
         return (torch.from_numpy(img[None].astype(np.float32)),
