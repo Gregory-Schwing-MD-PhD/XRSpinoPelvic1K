@@ -257,3 +257,71 @@ def test_buu_index_finds_the_real_dataset():
     rows = index_buu(root)
     assert len(rows) == 400
     assert all(r["img"].endswith(".jpg") and r["csv"].endswith(".csv") for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# Femoral head -> bicoxofemoral point
+# ---------------------------------------------------------------------------
+
+def _disc(shape, cx, cy, r):
+    import numpy as np
+    yy, xx = np.mgrid[0:shape[0], 0:shape[1]]
+    return ((xx - cx) ** 2 + (yy - cy) ** 2) <= r * r
+
+
+def test_union_centroid_is_the_midpoint_at_any_overlap():
+    """The load-bearing claim: for EQUAL radii the union blob's centroid is exactly the
+    midpoint of the two head centres, whatever the overlap -- so the two projected heads
+    never have to be separated."""
+    import numpy as np
+    from xrsp.femhead import bicoxofemoral_from_mask
+    H, W, r = 400, 400, 40
+    for sep in (0, 5, 20, 40, 79, 120):          # total overlap -> fully separate
+        cx1, cx2, cy = 200 - sep / 2, 200 + sep / 2, 200
+        m = _disc((H, W), cx1, cy, r) | _disc((H, W), cx2, cy, r)
+        p = bicoxofemoral_from_mask(m)
+        assert abs(p[0] - 200.0) < 0.75, f"sep={sep}: x={p[0]}"
+        assert abs(p[1] - 200.0) < 0.75, f"sep={sep}: y={p[1]}"
+
+
+def test_unequal_radii_bias_is_small_and_toward_the_larger_head():
+    """The known bias: near/far magnification makes one disc bigger. Direction and
+    magnitude are both checked, so a regression that inflates it is caught."""
+    import numpy as np
+    from xrsp.femhead import bicoxofemoral_from_mask
+    H, W = 400, 400
+    m = _disc((H, W), 180, 200, 40) | _disc((H, W), 220, 200, 42)   # 5% larger, right
+    p = bicoxofemoral_from_mask(m)
+    assert p[0] > 200.0                      # biased toward the LARGER disc
+    assert p[0] - 200.0 < 3.0                # but only slightly
+
+
+def test_qc_flags_reject_the_failures_that_matter():
+    import numpy as np
+    from xrsp.femhead import qc_flags
+    H, W = 300, 300
+    good = _disc((H, W), 150, 150, 40)
+    assert qc_flags(good)["ok"]
+    assert not qc_flags(np.zeros((H, W), bool))["ok"]                    # empty
+    assert not qc_flags(_disc((H, W), 2, 150, 40))["ok"]                 # touches border
+    two = _disc((H, W), 80, 80, 25) | _disc((H, W), 230, 230, 25)
+    assert qc_flags(two)["fragmented"] and not qc_flags(two)["ok"]       # two blobs
+    assert not qc_flags(np.ones((H, W), bool))["ok"]                     # absurd area
+
+
+def test_tta_spread_measures_scatter():
+    from xrsp.femhead import tta_spread
+    assert tta_spread([[10, 10], [10, 10], [10, 10]]) == 0.0
+    assert tta_spread([[0, 0], [6, 8]]) > 4.0
+    assert tta_spread([[1, 1]]) is None
+
+
+def test_xray_appearance_preserves_shape_and_range():
+    import numpy as np
+    from xrsp.femhead import xray_appearance
+    rng = np.random.default_rng(0)
+    x = np.clip(rng.random((64, 48)).astype(np.float32), 0, 1)
+    for _ in range(25):
+        y = xray_appearance(x, rng)
+        assert y.shape == x.shape and y.dtype == np.float32
+        assert float(y.min()) >= 0.0 and float(y.max()) <= 1.0

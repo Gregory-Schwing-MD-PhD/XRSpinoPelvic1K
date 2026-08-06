@@ -236,6 +236,20 @@ def build_case_oblique(ct_path, label_path, out_dir, *, n_views=8, seed=0, gamma
                 except Exception:                         # noqa: BLE001
                     pass
             corners[name] = c4
+        # FEMORAL-HEAD mask: the training target for the hip-point segmenter. Written
+        # here because it must share the DRR's exact geometry -- the same plan renders
+        # the image and projects the mask, so they cannot drift.
+        try:
+            from .femhead import head_mask_3d
+            from .oblique import _project_mask
+            _hm3 = head_mask_3d(lab, aff, LABELS, ostk_path=ostk_path)
+            if _hm3 is not None and _hm3.any():
+                _hfp = _project_mask(_hm3, aff, plan)
+                np.save(os.path.join(out_dir, f"lat{k:02d}_head.npy"),
+                        _hfp.astype(np.uint8))
+        except Exception:                                     # noqa: BLE001
+            pass
+
         tag = f"lat{k:02d}"
         _save_png(os.path.join(out_dir, f"{tag}_drr.png"), to_uint8(drr))
         np.save(os.path.join(out_dir, f"{tag}_drr.npy"), drr.astype(np.float32))
