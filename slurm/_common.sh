@@ -30,13 +30,28 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 export SINGULARITYENV_PYTHONPATH=/workspace
 export SINGULARITYENV_OMP_NUM_THREADS="${OMP_NUM_THREADS}"
 
-if command -v apptainer >/dev/null 2>&1; then
+# Runtime selection. Order matters and is NOT "whatever is on PATH first":
+#
+# On this grid the system `singularity` (singularity-ce 4.0.2) is on PATH by default but
+# BROKEN -- both `pull` and `build --fakeroot` die with
+#     /usr/bin/singularity: no such file or directory
+#     /usr/libexec/singularity/bin/starter-suid not found
+# because the wrapper points at paths the install does not have. The working runtime is
+# the apptainer MODULE, which is not on PATH until loaded and pulls from Docker Hub
+# correctly. Preferring PATH order therefore picks the broken one every time.
+#
+# So: try the module FIRST, fall back to whatever is on PATH.
+if module load apptainer 2>/dev/null && command -v apptainer >/dev/null 2>&1; then
+    RUNNER=apptainer
+elif command -v apptainer >/dev/null 2>&1; then
     RUNNER=apptainer
 elif command -v singularity >/dev/null 2>&1; then
     RUNNER=singularity
 else
-    module load apptainer 2>/dev/null && RUNNER=apptainer || RUNNER=singularity
+    echo "ERROR: no apptainer/singularity available (try: module load apptainer)" >&2
+    exit 1
 fi
+echo "[container runtime] ${RUNNER} -- $(command -v ${RUNNER})"
 
 # xrun [--nv] <cmd...>   run inside the container with the repo bound at /workspace
 xrun() {
