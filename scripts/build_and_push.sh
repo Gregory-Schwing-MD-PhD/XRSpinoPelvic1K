@@ -72,12 +72,34 @@ log "context   : ${HERE}"
 # the generated labels, so an unpinned image silently changes the dataset between
 # rebuilds. Pin it to a sha for anything you intend to publish.
 log "step 1/3 — building (this takes a while; base is pytorch cuda12.4 + MONAI)"
-docker build \
-    --build-arg "OSTK_REF=${OSTK_REF}" \
-    -f "${HERE}/docker/Dockerfile" \
-    -t "${FULL}" \
-    --progress=plain \
-    "${HERE}"
+_build() {
+    docker build \
+        --build-arg "OSTK_REF=${OSTK_REF}" \
+        -f "${HERE}/docker/Dockerfile" \
+        -t "${FULL}" \
+        --progress=plain \
+        ${1:-} \
+        "${HERE}"
+}
+
+# A BuildKit cache left inconsistent by a killed daemon or a killed WSL fails with
+#     failed to prepare <id> as <id>: parent snapshot <id> does not exist: not found
+# Layers report CACHED while the snapshot chain beneath them is gone. It is not a
+# Dockerfile problem and re-running does not fix it -- the cache has to be dropped. So
+# retry once automatically instead of making that the user's problem.
+_log_tmp="$(mktemp)"
+if ! _build 2>&1 | tee "${_log_tmp}"; then
+    if grep -q "parent snapshot .* does not exist" "${_log_tmp}"; then
+        log "BuildKit cache is inconsistent (stale parent snapshot). Pruning, then"
+        log "rebuilding with --no-cache. This restarts from the base image."
+        docker builder prune -af >/dev/null 2>&1 || true
+        _build --no-cache 2>&1 | tee "${_log_tmp}" || { rm -f "${_log_tmp}"; die "build failed after cache prune."; }
+    else
+        rm -f "${_log_tmp}"
+        die "build failed (see output above)."
+    fi
+fi
+rm -f "${_log_tmp}"
 
 log "step 2/3 — built. size: $(docker images --format '{{.Size}}' "${FULL}" | head -1)"
 

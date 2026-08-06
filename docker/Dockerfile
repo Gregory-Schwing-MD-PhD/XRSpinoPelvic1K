@@ -64,7 +64,11 @@ RUN pip install --no-cache-dir \
         "git+https://github.com/Gregory-Schwing-MD-PhD/OpenSpineToolkit.git@${OSTK_REF}"
 
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/workspace:${PYTHONPATH}
+# Plain assignment, not /workspace:${PYTHONPATH} -- PYTHONPATH is undefined in the
+# base image, so the expansion leaves a trailing ':' (an empty path entry, which
+# Python reads as the CWD) and BuildKit warns UndefinedVar. The SLURM wrapper passes
+# PYTHONPATH explicitly via --env anyway.
+ENV PYTHONPATH=/workspace
 ENV MPLBACKEND=Agg
 
 # ── Smoke test: fail the BUILD, not the 48-hour grid job ─────────────────────
