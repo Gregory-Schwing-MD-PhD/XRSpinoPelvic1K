@@ -14,6 +14,7 @@ N_VIEWS        ?= 8
 EPOCHS         ?= 200
 FOLD           ?= 0
 OSTK_REF       ?= main
+BUU            ?= ../CTSpinoPelvic1K-1/BUU-LSPINE_400
 
 .PHONY: help image container generate splits train train-fold eval eval-buu \
         reader-set test smoke lint clean-logs status
@@ -62,6 +63,9 @@ reader-set:  ## Stage 4c: blinded DRR reader set for the rater study
 # =============================================================================
 test:  ## Run the test suite (numpy only -- no GPU or container needed)
 	python -m pytest tests -q
+
+smoke-union:  ## LOCAL: end-to-end check of the DRR + BUU union (seconds, CPU)
+	python scripts/smoke_union.py --drr $(DATA)/xrsp1k --buu $(BUU)
 
 smoke:  ## Verify the TORCH path inside the container before a long GPU job
 	apptainer exec --nv \
