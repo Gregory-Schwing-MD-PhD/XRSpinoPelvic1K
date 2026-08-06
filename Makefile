@@ -64,6 +64,21 @@ reader-set:  ## Stage 4c: blinded DRR reader set for the rater study
 test:  ## Run the test suite (numpy only -- no GPU or container needed)
 	python -m pytest tests -q
 
+unified:  ## GRID: train the unified model (hip from DRRs, corners from BUU)
+	EPOCHS=$(EPOCHS) BUU=$(BUU) sbatch slurm/xrsp_unified.sh
+
+femhead:  ## GRID: train the femoral-head segmenter (alternative hip route)
+	sbatch slurm/xrsp_femhead.sh
+
+measure:  ## GRID/LOCAL: run the unified model on BUU, QC-gated, report PI
+	python scripts/measure_pi_unified.py --buu $(BUU) 	  --model $(DATA)/runs/unified/best.pt --out results/buu_pi.csv
+
+validate-hip:  ## Independent classical circle-fit check of the hip point (no labels)
+	python scripts/validate_hip_circlefit.py --buu $(BUU) 	  --model $(DATA)/runs/unified/best.pt --out results/hip_circlefit.csv
+
+nf:  ## GRID: run the whole pipeline under Nextflow (-resume re-runs only failures)
+	nextflow run nextflow/main.nf -profile slurm -resume 	  --ct_dir $(DATA)/ct --label_dir $(DATA)/labels --buu $(BUU) --outdir $(DATA)/xrsp1k
+
 smoke-union:  ## LOCAL: end-to-end check of the DRR + BUU union (seconds, CPU)
 	python scripts/smoke_union.py --drr $(DATA)/xrsp1k --buu $(BUU)
 

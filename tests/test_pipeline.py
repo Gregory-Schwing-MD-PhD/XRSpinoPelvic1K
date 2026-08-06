@@ -325,3 +325,68 @@ def test_xray_appearance_preserves_shape_and_range():
         y = xray_appearance(x, rng)
         assert y.shape == x.shape and y.dtype == np.float32
         assert float(y.min()) >= 0.0 and float(y.max()) <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Unified model: disjoint supervision
+# ---------------------------------------------------------------------------
+
+def test_supervision_mask_is_disjoint_between_streams():
+    """The core contract: DRR supervises the hip channel, BUU the corners, and the two
+    sets do not overlap -- which is what retires the corner-convention question."""
+    from xrsp.heatmaps import FEMORAL_KEY, channel_names
+    from xrsp.unified import corner_channels, hip_channels
+    names = channel_names(["L1", "L5", "S1"])
+    hip, cor = hip_channels(names), corner_channels(names)
+    assert hip == [FEMORAL_KEY]
+    assert FEMORAL_KEY not in cor
+    assert set(hip) & set(cor) == set()
+    assert set(hip) | set(cor) == set(names)
+
+
+def test_supervision_mask_zeroes_only_the_dropped_channels():
+    import numpy as np
+    import torch
+    from xrsp.heatmaps import FEMORAL_KEY, channel_names
+    from xrsp.unified import SupervisionMask, hip_channels
+    names = channel_names(["L1"])
+
+    class _Fake:
+        def __len__(self): return 1
+        def __getitem__(self, i):
+            v = torch.ones(len(names), dtype=torch.bool)
+            return torch.zeros(1, 8, 8), torch.zeros(len(names), 8, 8), v, {}
+
+    m = SupervisionMask(_Fake(), names, hip_channels(names))
+    _, _, v, _ = m[0]
+    assert bool(v[names.index(FEMORAL_KEY)])
+    assert not bool(v[names.index("L1.sup_ant")])
+    assert int(v.sum()) == 1
+
+
+def test_supervision_mask_refuses_to_mask_everything():
+    import pytest
+    from xrsp.heatmaps import channel_names
+    from xrsp.unified import SupervisionMask
+    names = channel_names(["L1"])
+    with pytest.raises(ValueError):
+        SupervisionMask(None, names, [])
+
+
+def test_ordering_violations_detect_flipped_corners():
+    """Self-consistency checks need no ground truth, which is why they work on BUU."""
+    import importlib.util, os, sys
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "scripts", "measure_pi_unified.py")
+    spec = importlib.util.spec_from_file_location("mpu", p)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["mpu"] = mod
+    spec.loader.exec_module(mod)
+    names = ["L1.sup_ant", "L1.sup_post", "L1.inf_ant", "L1.inf_post"]
+    good = {"L1.sup_ant": [100, 10], "L1.sup_post": [50, 12],
+            "L1.inf_ant": [100, 40], "L1.inf_post": [50, 42]}
+    assert mod.ordering_violations(good, names) == []
+    flipped = dict(good, **{"L1.sup_ant": [40, 10]})       # anterior behind posterior
+    assert any("sup_ant_not_anterior" in v for v in mod.ordering_violations(flipped, names))
+    upside = dict(good, **{"L1.sup_ant": [100, 99]})       # superior below inferior
+    assert any("sup_below_inf" in v for v in mod.ordering_violations(upside, names))
