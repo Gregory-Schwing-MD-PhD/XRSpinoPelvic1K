@@ -53,6 +53,7 @@ fi
 banner "unified landmark model  (${EPOCHS} epochs)"
 xrun --nv python scripts/train_unified.py \
     --drr "${DRR}" --buu "${BUU}" --out "${RUN_DIR}" \
-    --buu_splits "${BUU_SPLITS}" \n    --epochs "${EPOCHS}" --batch "${BATCH}" ${RESUME}
+    --buu_splits "${BUU_SPLITS}" \
+    --epochs "${EPOCHS}" --batch "${BATCH}" ${RESUME}
 
 echo "[unified] done $(date)"

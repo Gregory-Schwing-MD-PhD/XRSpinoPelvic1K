@@ -86,11 +86,22 @@ export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-${SINGULARITY_CACHEDIR}}"
 export SINGULARITY_TMPDIR="${SINGULARITY_TMPDIR:-${_CACHE_ROOT}/.singularity_tmp}"
 export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-${SINGULARITY_TMPDIR}}"
 mkdir -p "${SINGULARITY_CACHEDIR}" "${SINGULARITY_TMPDIR}"
-# A ~10 GB conversion needs room for the layers AND the assembled .sif
+# The image is 14.1 GB on Docker Hub, not the ~10 GB this once assumed. The conversion
+# holds the pulled layers, the unpacked rootfs AND the assembled .sif at the same time,
+# so budget ~40 GB rather than 25.
+#
+# `df` is necessary but NOT sufficient on the $HOME fallback: on an NFS home it reports
+# the size of the whole filesystem, which is enormous, while the thing that actually
+# stops the pull is the per-user QUOTA. So report the quota too when the grid exposes
+# one -- a pull that dies at 90% because of a quota looks exactly like a network failure.
 _avail=$(df -Pk "${_CACHE_ROOT}" | awk "NR==2{print \$4}")
-if [[ -n "${_avail}" && "${_avail}" -lt 25000000 ]]; then
-    log "WARNING: only $((_avail/1024/1024)) GB free at ${_CACHE_ROOT}; a ~10 GB image"
-    log "         conversion needs roughly 25 GB. Set XRSP_CACHE_ROOT to somewhere larger."
+if [[ -n "${_avail}" && "${_avail}" -lt 40000000 ]]; then
+    log "WARNING: only $((_avail/1024/1024)) GB free at ${_CACHE_ROOT}; the 14.1 GB image"
+    log "         needs roughly 40 GB to convert. Set XRSP_CACHE_ROOT somewhere larger."
+fi
+if [[ "${_CACHE_ROOT}" == "${HOME}"* ]] && command -v quota >/dev/null 2>&1; then
+    log "cache is under \$HOME and df cannot see a quota -- yours:"
+    quota -s 2>/dev/null | sed 's/^/         /' || log "         (quota reported nothing)"
 fi
 log "cache: ${SINGULARITY_CACHEDIR}"
 
