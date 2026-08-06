@@ -78,6 +78,12 @@ xrun() {
     binds+=",${DATA_ROOT}:/data"
     binds+=",${HOST_CONTAINER_TMP}:/tmp"
     local cenv="PYTHONPATH=/workspace"
+    # Without this a SLURM .out is a FILE, so Python block-buffers stdout at ~8 KB and a
+    # 12-hour job looks dead for its first hour -- the per-case progress lines exist but
+    # sit in a buffer. The Dockerfile sets PYTHONUNBUFFERED, but relying on the image's
+    # ENV surviving --env across singularity versions is not worth the ambiguity when
+    # "is it running or hung?" is the question this answers.
+    cenv+=",PYTHONUNBUFFERED=1"
     cenv+=",OMP_NUM_THREADS=${OMP_NUM_THREADS}"
     cenv+=",NUMEXPR_MAX_THREADS=${OMP_NUM_THREADS}"
     cenv+=",MPLBACKEND=Agg"
