@@ -16,11 +16,14 @@
 # =============================================================================
 set -euo pipefail
 
-# go2432, NOT gregoryschwingmdphd. The latter is the HuggingFace username and, confusingly,
-# also an empty Docker Hub account that exists -- so it looks right, resolves, and then
-# rejects the push with "insufficient_scope" because you can only push to a namespace you
-# are logged in to. Every other image (spine-level-ai-*, lstv-*) lives under go2432.
-DOCKERHUB_USER="${DOCKERHUB_USER:-go2432}"
+# TWO Docker Hub accounts exist and both are real:
+#   gregoryschwingmdphd -> this project's images (ctspinopelvic1k, ctspinopelvic1k-ts,
+#                          spinesurg-ct*). xrspinopelvic belongs HERE.
+#   go2432              -> older work (gomc, namd, deepchem, lstv-*, spine-level-ai-*)
+# A push is only permitted into the namespace you are logged in to, so being logged in
+# as go2432 while targeting this one fails with "insufficient_scope" -- which reads like
+# a repo permission problem rather than the wrong account. The preflight below checks it.
+DOCKERHUB_USER="${DOCKERHUB_USER:-gregoryschwingmdphd}"
 IMAGE_NAME="${IMAGE_NAME:-xrspinopelvic}"
 TAG="${TAG:-latest}"
 PUSH="${PUSH:-1}"
