@@ -49,7 +49,22 @@ elif module load apptainer 2>/dev/null && command -v apptainer >/dev/null 2>&1; 
     BUILDER="apptainer"
 elif command -v apptainer >/dev/null 2>&1; then BUILDER="apptainer"
 else
-    die "no singularity/apptainer. Expected ${CONDA_PREFIX}/bin/singularity"
+    echo "" >&2
+    echo "[ERROR] no singularity/apptainer found on this machine." >&2
+    echo "" >&2
+    echo "  This script runs ON THE GRID. It PULLS a prebuilt image and converts it to" >&2
+    echo "  a .sif -- it cannot build one, because the grid has no fakeroot." >&2
+    echo "" >&2
+    echo "  If you are on your workstation, you want the OTHER script first:" >&2
+    echo "      ./scripts/build_and_push.sh          # needs Docker, publishes the image" >&2
+    echo "  then, on the grid:" >&2
+    echo "      ssh ${GRID_HOST:-go2432@grid.wayne.edu}" >&2
+    echo "      cd ~/XRSpinoPelvic1K && bash containers/build_container.sh" >&2
+    echo "" >&2
+    echo "  If you ARE on the grid, singularity was expected at:" >&2
+    echo "      ${CONDA_PREFIX}/bin/singularity" >&2
+    echo "  (the one on the default PATH is broken there). Override with CONDA_PREFIX_XRSP." >&2
+    exit 1
 fi
 log "builder: ${BUILDER}  ($(${BUILDER} --version 2>&1 | head -1))"
 
