@@ -15,6 +15,7 @@ EPOCHS         ?= 200
 FOLD           ?= 0
 OSTK_REF       ?= main
 BUU            ?= ../CTSpinoPelvic1K-1/BUU-LSPINE_400
+BUU_ZIP        ?= BUU-LSPINE_400.zip
 
 .PHONY: help image container generate splits train train-fold eval eval-buu \
         reader-set test smoke lint clean-logs status
@@ -63,6 +64,12 @@ reader-set:  ## Stage 4c: blinded DRR reader set for the rater study
 # =============================================================================
 test:  ## Run the test suite (numpy only -- no GPU or container needed)
 	python -m pytest tests -q
+
+buu:  ## Stage + verify BUU-LSpine from a local archive (NOT redistributed here)
+	python scripts/fetch_buu.py --zip $(BUU_ZIP) --out $(BUU)
+
+buu-check:  ## Verify an existing BUU tree before burning grid time on it
+	python scripts/fetch_buu.py --check $(BUU)
 
 unified:  ## GRID: train the unified model (hip from DRRs, corners from BUU)
 	EPOCHS=$(EPOCHS) BUU=$(BUU) sbatch slurm/xrsp_unified.sh
