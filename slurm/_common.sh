@@ -81,7 +81,13 @@ xrun() {
     cenv+=",OMP_NUM_THREADS=${OMP_NUM_THREADS}"
     cenv+=",NUMEXPR_MAX_THREADS=${OMP_NUM_THREADS}"
     cenv+=",MPLBACKEND=Agg"
-    singularity exec "${nv[@]}" \
+    # ${nv[@]+"${nv[@]}"}, NOT "${nv[@]}". Under `set -u` bash 4.2 -- which is what the
+    # el7 compute nodes run -- treats an EMPTY array expansion as an unbound variable and
+    # aborts. Bash only made "${arr[@]}" safe on an empty array in 4.4, so this worked on
+    # a modern workstation and killed all 20 array tasks on the grid, at the first xrun,
+    # before a single DRR was rendered. The +alternate form expands to nothing at all when
+    # the array is empty and is correct on every version.
+    singularity exec ${nv[@]+"${nv[@]}"} \
         --env "${cenv}" \
         --bind "${binds}" \
         --pwd /workspace \
@@ -93,7 +99,16 @@ banner() {
     echo " XRSpinoPelvic1K -- $*"
     echo " Job     : ${SLURM_JOB_ID:-local}${SLURM_ARRAY_TASK_ID:+ [task ${SLURM_ARRAY_TASK_ID}]}"
     echo " Host    : $(hostname)"
-    echo " GPU     : $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
+    # nvidia-smi prints its "couldn't communicate with the NVIDIA driver" complaint on
+    # STDOUT, not stderr, so 2>/dev/null did not suppress it and every CPU-stage log
+    # opened with a four-line driver error that looks like the reason the job failed.
+    # It is not -- the CPU stages have no GPU by design. Check the exit status instead.
+    local _gpu
+    if _gpu="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null)"; then
+        echo " GPU     : $(echo "${_gpu}" | head -1)"
+    else
+        echo " GPU     : none (CPU stage)"
+    fi
     echo " Root    : ${PROJECT_ROOT}"
     echo " Data    : ${DATA_ROOT}  ->  /data"
     echo " SIF     : ${CONTAINER}"
