@@ -32,23 +32,24 @@ OUTPUT="${OUTPUT:-${HERE}/xrspinopelvic.sif}"
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 die() { echo "[ERROR] $*" >&2; exit 1; }
 
-# MODULE FIRST, not PATH order. On this grid the system `singularity` (singularity-ce
-# 4.0.2) sits on PATH but is broken -- `pull` dies with
-#     fork/exec /usr/bin/singularity: no such file or directory
-# and `build --fakeroot` with
-#     /usr/libexec/singularity/bin/starter-suid not found
-# while the apptainer MODULE (1.2.2), which is not on PATH until loaded, pulls correctly.
-# Preferring PATH order picks the broken runtime every time.
+# The singularity on the default PATH (singularity-ce 4.0.2) is BROKEN on this grid --
+# `pull` dies with "fork/exec /usr/bin/singularity: no such file or directory" and
+# `build --fakeroot` with "starter-suid not found". The working binary is 3.8.6 in the
+# conda env, which is the same one CTSpinoPelvic1K's jobs use. Inherited LD_LIBRARY_PATH
+# and friends leak host libraries into the container, so they are cleared first.
+export CONDA_PREFIX="${CONDA_PREFIX_XRSP:-${HOME}/mambaforge/envs/nextflow}"
+export PATH="${CONDA_PREFIX}/bin:${PATH}"
+unset JAVA_HOME LD_LIBRARY_PATH PYTHONPATH R_LIBS R_LIBS_USER R_LIBS_SITE
+unset SINGULARITYENV_HOME
+
 if [[ -n "${BUILDER:-}" ]]; then
     :
+elif command -v singularity >/dev/null 2>&1; then BUILDER="singularity"
 elif module load apptainer 2>/dev/null && command -v apptainer >/dev/null 2>&1; then
     BUILDER="apptainer"
 elif command -v apptainer >/dev/null 2>&1; then BUILDER="apptainer"
-elif module load singularity 2>/dev/null && command -v singularity >/dev/null 2>&1; then
-    BUILDER="singularity"
-elif command -v singularity >/dev/null 2>&1; then BUILDER="singularity"
 else
-    die "neither apptainer nor singularity found. Try: module load apptainer"
+    die "no singularity/apptainer. Expected ${CONDA_PREFIX}/bin/singularity"
 fi
 log "builder: ${BUILDER}  ($(${BUILDER} --version 2>&1 | head -1))"
 

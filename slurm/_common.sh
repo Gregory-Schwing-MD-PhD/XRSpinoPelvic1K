@@ -3,6 +3,35 @@
 #
 # Centralises the singularity invocation so every stage binds identically and a
 # grid-path change is a one-file edit rather than a six-file hunt.
+#
+# ENVIRONMENT, and why it is this specific incantation
+# ----------------------------------------------------
+# Copied from the working CTSpinoPelvic1K recipe (slurm/benchmark_totalseg.sh),
+# because the obvious setup does not work on this grid:
+#
+#   * The singularity on the default PATH (/usr/bin, singularity-ce 4.0.2) is BROKEN --
+#         pull             -> fork/exec /usr/bin/singularity: no such file or directory
+#         build --fakeroot -> /usr/libexec/singularity/bin/starter-suid not found
+#     The working one is 3.8.6 inside the conda env, so CONDA_PREFIX/bin goes on PATH
+#     FIRST. `which singularity` is echoed below precisely so a job log records which
+#     binary actually ran.
+#
+#   * LD_LIBRARY_PATH, PYTHONPATH, JAVA_HOME and the R_LIBS family are UNSET before the
+#     call. Inherited host paths leak into the container and shadow its own libraries,
+#     which surfaces as import errors that look like a broken image rather than a broken
+#     environment. PYTHONPATH is passed back in explicitly via --env, so /workspace is
+#     still importable.
+#
+#   * SINGULARITYENV_HOME is unset: a stale value silently redirects $HOME inside the
+#     container and anything writing to it lands somewhere unexpected.
+#
+# SCRATCH, split deliberately
+# ---------------------------
+#   sandbox unpack (~10 GB, read-mostly hot path) -> node-local /tmp   (fast)
+#   container /tmp (runtime scratch)              -> project NFS       (survives, large)
+#   XDG runtime    (near-empty)                   -> project NFS
+# A shared /tmp across concurrent array tasks is a reliable source of mysterious
+# mid-run failures, so both are per-job and removed on exit.
 # =============================================================================
 set -euo pipefail
 
@@ -12,54 +41,49 @@ DATA_ROOT="${DATA_ROOT:-${PROJECT_ROOT}/data}"
 LOG_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs}"
 mkdir -p "${LOG_DIR}"
 
+# ── the environment singularity actually needs ───────────────────────────────
+export CONDA_PREFIX="${CONDA_PREFIX_XRSP:-${HOME}/mambaforge/envs/nextflow}"
+export PATH="${CONDA_PREFIX}/bin:${PATH}"
+unset JAVA_HOME LD_LIBRARY_PATH PYTHONPATH R_LIBS R_LIBS_USER R_LIBS_SITE
+unset SINGULARITYENV_HOME
+if ! command -v singularity >/dev/null 2>&1; then
+    echo "ERROR: no singularity on PATH after prepending ${CONDA_PREFIX}/bin" >&2
+    echo "       (the system one is broken on this grid; the conda env has 3.8.6)" >&2
+    exit 1
+fi
+echo "[container] $(command -v singularity)  $(singularity --version 2>&1 | head -1)"
+
 if [[ ! -f "${CONTAINER}" ]]; then
     echo "ERROR: container missing: ${CONTAINER}" >&2
     echo "       run:  bash containers/build_container.sh" >&2
     exit 1
 fi
 
-# Per-job tmp on local scratch. Singularity writing into a shared /tmp across
-# concurrent array tasks is a reliable source of mysterious mid-run failures.
-export SINGULARITY_TMPDIR="${SINGULARITY_TMPDIR:-/tmp/${USER}_xrsp_${SLURM_JOB_ID:-$$}}"
-export APPTAINER_TMPDIR="${SINGULARITY_TMPDIR}"
-export XDG_RUNTIME_DIR="${SINGULARITY_TMPDIR}/runtime"
-mkdir -p "${SINGULARITY_TMPDIR}" "${XDG_RUNTIME_DIR}"
-trap 'rm -rf "${SINGULARITY_TMPDIR}"' EXIT
+# ── split scratch: sandbox on node /tmp, runtime on NFS ──────────────────────
+NODE_SCRATCH="/tmp/${USER}_xrsp_${SLURM_JOB_ID:-$$}"
+NFS_SCRATCH="${PROJECT_ROOT}/.scratch/${USER}_${SLURM_JOB_ID:-$$}"
+export SINGULARITY_TMPDIR="${NODE_SCRATCH}/singularity_unpack"
+HOST_CONTAINER_TMP="${NFS_SCRATCH}/container_tmp"
+export XDG_RUNTIME_DIR="${NFS_SCRATCH}/xdg_runtime"
+mkdir -p "${SINGULARITY_TMPDIR}" "${HOST_CONTAINER_TMP}" "${XDG_RUNTIME_DIR}"
+trap 'rm -rf "${NODE_SCRATCH}" "${NFS_SCRATCH}" 2>/dev/null || true' EXIT TERM INT
 
-export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
-export SINGULARITYENV_PYTHONPATH=/workspace
-export SINGULARITYENV_OMP_NUM_THREADS="${OMP_NUM_THREADS}"
-
-# Runtime selection. Order matters and is NOT "whatever is on PATH first":
-#
-# On this grid the system `singularity` (singularity-ce 4.0.2) is on PATH by default but
-# BROKEN -- both `pull` and `build --fakeroot` die with
-#     /usr/bin/singularity: no such file or directory
-#     /usr/libexec/singularity/bin/starter-suid not found
-# because the wrapper points at paths the install does not have. The working runtime is
-# the apptainer MODULE, which is not on PATH until loaded and pulls from Docker Hub
-# correctly. Preferring PATH order therefore picks the broken one every time.
-#
-# So: try the module FIRST, fall back to whatever is on PATH.
-if module load apptainer 2>/dev/null && command -v apptainer >/dev/null 2>&1; then
-    RUNNER=apptainer
-elif command -v apptainer >/dev/null 2>&1; then
-    RUNNER=apptainer
-elif command -v singularity >/dev/null 2>&1; then
-    RUNNER=singularity
-else
-    echo "ERROR: no apptainer/singularity available (try: module load apptainer)" >&2
-    exit 1
-fi
-echo "[container runtime] ${RUNNER} -- $(command -v ${RUNNER})"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-4}}"
 
 # xrun [--nv] <cmd...>   run inside the container with the repo bound at /workspace
 xrun() {
     local nv=()
     if [[ "${1:-}" == "--nv" ]]; then nv=(--nv); shift; fi
-    "${RUNNER}" exec "${nv[@]}" \
-        --bind "${PROJECT_ROOT}:/workspace" \
-        --bind "${DATA_ROOT}:/data" \
+    local binds="${PROJECT_ROOT}:/workspace"
+    binds+=",${DATA_ROOT}:/data"
+    binds+=",${HOST_CONTAINER_TMP}:/tmp"
+    local cenv="PYTHONPATH=/workspace"
+    cenv+=",OMP_NUM_THREADS=${OMP_NUM_THREADS}"
+    cenv+=",NUMEXPR_MAX_THREADS=${OMP_NUM_THREADS}"
+    cenv+=",MPLBACKEND=Agg"
+    singularity exec "${nv[@]}" \
+        --env "${cenv}" \
+        --bind "${binds}" \
         --pwd /workspace \
         "${CONTAINER}" "$@"
 }
@@ -69,7 +93,10 @@ banner() {
     echo " XRSpinoPelvic1K -- $*"
     echo " Job     : ${SLURM_JOB_ID:-local}${SLURM_ARRAY_TASK_ID:+ [task ${SLURM_ARRAY_TASK_ID}]}"
     echo " Host    : $(hostname)"
+    echo " GPU     : $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo N/A)"
     echo " Root    : ${PROJECT_ROOT}"
+    echo " Data    : ${DATA_ROOT}  ->  /data"
+    echo " SIF     : ${CONTAINER}"
     echo " Started : $(date)"
     echo "================================================================"
 }
