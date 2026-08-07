@@ -204,14 +204,25 @@ def main(argv=None):
     if not a.no_wandb and (os.environ.get("WANDB_API_KEY")
                            or os.environ.get("XRSP_WANDB") == "1"):
         try:
-            import hashlib
-
             import wandb
-            # A deterministic id keyed on the OUTPUT DIR, so a preempted job that
-            # resumes from last.pt rejoins the SAME run instead of starting a second
-            # one -- otherwise --requeue silently fragments one training curve across
+            # The run id lives in a FILE inside the output dir, minted once and read back
+            # thereafter. A preempted job resuming from last.pt finds the same id and
+            # rejoins the same run, so --requeue cannot fragment one training curve across
             # however many times SLURM bounced the job.
-            rid = "xrsp-" + hashlib.md5(os.path.abspath(a.out).encode()).hexdigest()[:10]
+            #
+            # Not a hash of the output PATH, which was the obvious choice and is wrong:
+            # deleting the checkpoints to start over leaves the path unchanged, so the
+            # next run re-attaches to the finished one and replays steps from 0 -- wandb
+            # rejects the non-monotonic steps and the fresh run's metrics vanish. Keying
+            # on a file makes the semantics match the intent exactly: the run directory
+            # IS the run, and removing it starts a new one.
+            id_path = os.path.join(a.out, "wandb_run_id.txt")
+            if os.path.exists(id_path):
+                rid = open(id_path).read().strip()
+            else:
+                rid = "xrsp-" + wandb.util.generate_id()
+                with open(id_path, "w") as fh:
+                    fh.write(rid)
             run = wandb.init(project=os.environ.get("WANDB_PROJECT", "xrspinopelvic1k"),
                              id=rid, resume="allow", dir=a.out,
                              name=os.path.basename(os.path.abspath(a.out)),
