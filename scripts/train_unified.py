@@ -175,8 +175,13 @@ def main(argv=None):
     # ~/.wandb/token exists, so grid runs log and laptop runs do not, with no argument
     # either way. Any failure here degrades to no logging: an unreachable wandb must
     # never take down a 12-hour training job.
+    # XRSP_WANDB covers the `wandb login` case: that writes ~/.netrc, which leaves NO key
+    # in the environment, so gating on WANDB_API_KEY alone would report "not configured"
+    # for someone who is properly logged in. _common.sh sets the flag for any of the three
+    # credential sources; the library still finds ~/.netrc by itself through $HOME.
     run = None
-    if not a.no_wandb and os.environ.get("WANDB_API_KEY"):
+    if not a.no_wandb and (os.environ.get("WANDB_API_KEY")
+                           or os.environ.get("XRSP_WANDB") == "1"):
         try:
             import hashlib
 

@@ -80,14 +80,34 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-4}}"
 #
 # Absent token -> nothing exported -> the trainer runs with logging disabled. Offline
 # and local runs therefore need no special casing.
-if [[ -z "${WANDB_API_KEY:-}" && -r "${HOME}/.wandb/token" ]]; then
-    WANDB_API_KEY="$(< "${HOME}/.wandb/token")"
-fi
+# THREE ways to be authenticated, and only the first two produce a key:
+#   1. WANDB_API_KEY already exported
+#   2. ~/.wandb/token          -- the spinesurg-ct-nnunet convention
+#   3. ~/.netrc                -- what `wandb login` actually writes
+# (3) is the easy one to miss. It leaves no key anywhere to read, so a check for
+# WANDB_API_KEY reports "not configured" for someone who is perfectly well logged in.
+# spinesurg never noticed because it calls wandb unconditionally and lets the library
+# find ~/.netrc itself through the auto-mounted $HOME. The trainer here is opt-in, so
+# case (3) has to be detected explicitly or logging silently never turns on.
+_wandb_src=""
 if [[ -n "${WANDB_API_KEY:-}" ]]; then
-    export SINGULARITYENV_WANDB_API_KEY="${WANDB_API_KEY}"
-    echo "[wandb] token found -- run logging enabled"
+    _wandb_src="WANDB_API_KEY in the environment"
+elif [[ -r "${HOME}/.wandb/token" ]]; then
+    WANDB_API_KEY="$(< "${HOME}/.wandb/token")"
+    _wandb_src="~/.wandb/token"
+elif grep -qs "api\.wandb\.ai" "${HOME}/.netrc"; then
+    # Deliberately NOT parsed into a key. The library reads .netrc perfectly well on its
+    # own through $HOME, and scraping a credential out of a file to re-export it is a
+    # good way to leak one. Just tell the trainer it is allowed to try.
+    _wandb_src="~/.netrc (wandb login)"
+fi
+if [[ -n "${_wandb_src}" ]]; then
+    [[ -n "${WANDB_API_KEY:-}" ]] && export SINGULARITYENV_WANDB_API_KEY="${WANDB_API_KEY}"
+    export SINGULARITYENV_XRSP_WANDB=1
+    echo "[wandb] authenticated via ${_wandb_src} -- run logging enabled"
 else
-    echo "[wandb] no ~/.wandb/token -- logging disabled (metrics still go to this log)"
+    echo "[wandb] no credentials (env, ~/.wandb/token or ~/.netrc) -- logging disabled;"
+    echo "        metrics still print to this log. 'wandb login' on the grid enables it."
 fi
 
 # xrun [--nv] <cmd...>   run inside the container with the repo bound at /workspace
