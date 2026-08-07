@@ -65,6 +65,53 @@ for d in ct labels; do
         || bad "data/${d} is missing or empty — stage 1 has nothing to render"
 done
 
+# --- the labels must contain FEMURS, or the whole DRR half of the run is inert ------
+# The DRRs supervise only the bicoxofemoral point. Without femur/hip ids there is no
+# hip point, so 6000+ rendered views contribute zero gradient and the model cannot
+# produce PI or PT -- and nothing fails. The single symptom is `hip nanpx` in the
+# training log, discovered hours later.
+#
+# This is exactly the v2-vs-v3 trap: v2 is "model-completed dense spinopelvic labels",
+# v3 is "bone-augmented (femurs + thoracic + S1)". Both look complete on disk and both
+# pass every other check here.
+#
+# Needs the container (nibabel), so it is skipped -- loudly -- when the .sif is absent.
+if [[ -f "${SIF}" ]]; then
+    _CP="${CONDA_PREFIX_XRSP:-${HOME}/mambaforge/envs/nextflow}"
+    if PATH="${_CP}/bin:${PATH}" command -v singularity >/dev/null 2>&1; then
+        _lab=$(env -u LD_LIBRARY_PATH -u PYTHONPATH -u JAVA_HOME -u SINGULARITYENV_HOME \
+               PATH="${_CP}/bin:${PATH}" \
+               singularity exec --bind "${HERE}":/workspace --bind "${DATA_ROOT}":/data \
+                 --pwd /workspace --env PYTHONPATH=/workspace "${SIF}" \
+                 python3 -c "
+import glob, numpy as np, nibabel as nib
+from xrsp.labels import labels_for
+fs = sorted(glob.glob('/data/labels/*.nii*'))
+if not fs: print('NOLABELS'); raise SystemExit
+lab = np.asanyarray(nib.load(fs[0]).dataobj)
+ids = set(int(i) for i in np.unique(lab)) - {0}
+L   = labels_for(lab)
+miss = [k for k in ('femur_left','femur_right','left_hip','right_hip')
+        if L.get(k) not in ids]
+print('MISSING:' + ','.join(miss) if miss else 'OK')
+" 2>/dev/null | tail -1 || echo "UNCHECKED")
+        case "${_lab}" in
+            OK)  ok "labels contain femurs + hips — the hip point can be fitted" ;;
+            MISSING:*)
+                 bad "labels are MISSING ${_lab#MISSING:}
+         This is the v2 export. Femurs arrive in v3 ('bone-augmented (femurs +
+         thoracic + S1)'). With no femurs there is no bicoxofemoral point, so every
+         DRR would train nothing and the model could not produce PI or PT.
+         Point data/ct and data/labels at the v3 export and delete data/xrsp1k." ;;
+            *)   ok "label femur check inconclusive (${_lab}) — not blocking" ;;
+        esac
+    else
+        ok "no singularity on the login node — skipping the femur check"
+    fi
+else
+    ok "container not built yet — femur check deferred to the unified stage gate"
+fi
+
 BUU_ABS="${DATA_ROOT}/${BUU_DIR}"
 if [[ -d "${BUU_ABS}/LA" ]]; then
     n_jpg=$(ls "${BUU_ABS}"/LA/*.jpg 2>/dev/null | wc -l || true)

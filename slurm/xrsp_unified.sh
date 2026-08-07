@@ -50,6 +50,30 @@ if [[ ! -f "${DATA_ROOT}/buu_splits.json" ]]; then
     exit 1
 fi
 
+# The DRRs supervise the HIP CHANNEL AND NOTHING ELSE (see xrsp/unified.py). If no
+# rendered view carries a bicoxofemoral point, every DRR contributes exactly zero
+# gradient and the run silently degrades to BUU-corners-only -- which can produce SS
+# and LL, but NOT PI or PT, since both need the hip axis. The only symptom is `hip
+# nanpx` in a per-epoch line, and 150 epochs is a long time to spend discovering it.
+#
+# build_dataset already records has_bicox per view. Nothing read it. Now something does.
+_MAN_OK=$(xrun sh -c "awk -F, 'FNR>1 && \$5==1 {n++} END {print n+0}' ${DRR}/manifest*.csv 2>/dev/null" || echo 0)
+if [[ "${_MAN_OK}" -eq 0 ]]; then
+    echo "" >&2
+    echo "ERROR: not one rendered view has a bicoxofemoral point (has_bicox=1 in 0 rows" >&2
+    echo "       of ${DRR}/manifest*.csv)." >&2
+    echo "" >&2
+    echo "  Almost always: the labels are the v2 export, which has no femurs. Femoral" >&2
+    echo "  segmentation arrives in v3 ('bone-augmented (femurs + thoracic + S1)')." >&2
+    echo "  femoral_head_center then has nothing to fit and every view comes out" >&2
+    echo "  has_bicox=0." >&2
+    echo "" >&2
+    echo "  Point data/labels + data/ct at the v3 export, delete data/xrsp1k, and" >&2
+    echo "  re-run stage 1. BUU and the container are unaffected." >&2
+    exit 1
+fi
+echo "[gate] ${_MAN_OK} rendered views carry a bicoxofemoral point"
+
 banner "unified landmark model  (${EPOCHS} epochs)"
 xrun --nv python scripts/train_unified.py \
     --drr "${DRR}" --buu "${BUU}" --out "${RUN_DIR}" \
