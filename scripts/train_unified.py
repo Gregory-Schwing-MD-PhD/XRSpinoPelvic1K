@@ -79,6 +79,10 @@ def main(argv=None):
                     help="splits.json from make_buu_splits.py. Strongly preferred over "
                          "the seed-derived split.")
     ap.add_argument("--resume", default=None, help="checkpoint to resume (preemption)")
+    ap.add_argument("--no_wandb", action="store_true",
+                    help="disable W&B even when WANDB_API_KEY is set. Logging is "
+                         "otherwise enabled by the presence of the token alone, so "
+                         "grid runs log and local ones do not, with no flag either way.")
     a = ap.parse_args(argv)
     if not a.drr and not a.buu:
         sys.exit("need --drr and/or --buu")
@@ -165,6 +169,34 @@ def main(argv=None):
     dl_va = DataLoader(ds_va, batch_size=a.batch, collate_fn=collate)
     fem_i = names.index(FEMORAL_KEY)
 
+    # ── W&B, opt-in by the PRESENCE OF A TOKEN, not by a flag ────────────────────
+    # A flag would have to be threaded through every caller and would be forgotten on
+    # exactly the run worth logging. WANDB_API_KEY is exported by slurm/_common.sh when
+    # ~/.wandb/token exists, so grid runs log and laptop runs do not, with no argument
+    # either way. Any failure here degrades to no logging: an unreachable wandb must
+    # never take down a 12-hour training job.
+    run = None
+    if not a.no_wandb and os.environ.get("WANDB_API_KEY"):
+        try:
+            import hashlib
+
+            import wandb
+            # A deterministic id keyed on the OUTPUT DIR, so a preempted job that
+            # resumes from last.pt rejoins the SAME run instead of starting a second
+            # one -- otherwise --requeue silently fragments one training curve across
+            # however many times SLURM bounced the job.
+            rid = "xrsp-" + hashlib.md5(os.path.abspath(a.out).encode()).hexdigest()[:10]
+            run = wandb.init(project=os.environ.get("WANDB_PROJECT", "xrspinopelvic1k"),
+                             id=rid, resume="allow", dir=a.out,
+                             name=os.path.basename(os.path.abspath(a.out)),
+                             config={**vars(a), "n_drr": len(drr_rows),
+                                     "n_buu": len(buu_rows), "levels": levels,
+                                     "n_channels": len(names)})
+            print(f"wandb: {getattr(run, 'url', '(offline)')}", flush=True)
+        except Exception as exc:                       # noqa: BLE001
+            print(f"wandb disabled ({type(exc).__name__}: {exc})", flush=True)
+            run = None
+
     for ep in range(start_ep, a.epochs):
         # sigma annealing: a wide basin early, precision late
         t = ep / max(1, a.epochs - 1)
@@ -205,6 +237,19 @@ def main(argv=None):
         print(f"  ep {ep:3d} sig {sig:4.1f}  train {tl/max(1,nb):.5f}  val {vl:.5f}  "
               f"all {np.mean(errs) if errs else float('nan'):5.1f}px  "
               f"hip {np.mean(hip_errs) if hip_errs else float('nan'):5.1f}px", flush=True)
+        if run is not None:
+            # hip_px is the one to WATCH, not train/val loss. The DRRs supervise the hip
+            # channel and nothing else, so a nan there means every DRR is contributing no
+            # gradient and the run has quietly become BUU-corners-only -- which cannot
+            # produce PI or PT. It is logged as its own series precisely so that shows up
+            # as a gap in a chart rather than as the word "nan" in one line of a log.
+            run.log({"epoch": ep, "sigma": sig,
+                     "train/loss": tl / max(1, nb), "val/loss": vl,
+                     "val/err_all_px": float(np.mean(errs)) if errs else float("nan"),
+                     "val/err_hip_px": (float(np.mean(hip_errs)) if hip_errs
+                                        else float("nan")),
+                     "val/hip_supervised": int(bool(hip_errs)),
+                     "val/best_loss": min(best, vl)}, step=ep)
         ck = {"model": net.state_dict(), "opt": opt.state_dict(), "epoch": ep,
               "best": best, "names": names, "size": list(size),
               "features": [16, 32, 64, 128, 256]}
@@ -214,6 +259,9 @@ def main(argv=None):
             ck["best"] = best
             torch.save(ck, os.path.join(a.out, "best.pt"))
     print(f"best val {best:.5f}  ->  {os.path.join(a.out, 'best.pt')}")
+    if run is not None:
+        run.summary["best_val_loss"] = best
+        run.finish()
     return 0
 
 

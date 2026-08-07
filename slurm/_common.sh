@@ -70,6 +70,26 @@ trap 'rm -rf "${NODE_SCRATCH}" "${NFS_SCRATCH}" 2>/dev/null || true' EXIT TERM I
 
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-4}}"
 
+# ── W&B, if a token is on disk ───────────────────────────────────────────────
+# Same convention as spinesurg-ct-nnunet: ~/.wandb/token holds the key.
+#
+# Passed as SINGULARITYENV_WANDB_API_KEY rather than through xrun's --env list,
+# deliberately. --env values land in the singularity command line, so the key would be
+# readable in `ps` by every other user on a shared node. The SINGULARITYENV_ prefix is
+# consumed from the ENVIRONMENT instead and never appears in argv.
+#
+# Absent token -> nothing exported -> the trainer runs with logging disabled. Offline
+# and local runs therefore need no special casing.
+if [[ -z "${WANDB_API_KEY:-}" && -r "${HOME}/.wandb/token" ]]; then
+    WANDB_API_KEY="$(< "${HOME}/.wandb/token")"
+fi
+if [[ -n "${WANDB_API_KEY:-}" ]]; then
+    export SINGULARITYENV_WANDB_API_KEY="${WANDB_API_KEY}"
+    echo "[wandb] token found -- run logging enabled"
+else
+    echo "[wandb] no ~/.wandb/token -- logging disabled (metrics still go to this log)"
+fi
+
 # xrun [--nv] <cmd...>   run inside the container with the repo bound at /workspace
 xrun() {
     local nv=()
@@ -77,6 +97,9 @@ xrun() {
     local binds="${PROJECT_ROOT}:/workspace"
     binds+=",${DATA_ROOT}:/data"
     binds+=",${HOST_CONTAINER_TMP}:/tmp"
+    # wandb writes its cache and offline runs under ~/.wandb; without the bind an
+    # interrupted upload has nowhere durable to spool to.
+    [[ -d "${HOME}/.wandb" ]] && binds+=",${HOME}/.wandb:${HOME}/.wandb"
     local cenv="PYTHONPATH=/workspace"
     # Without this a SLURM .out is a FILE, so Python block-buffers stdout at ~8 KB and a
     # 12-hour job looks dead for its first hour -- the per-case progress lines exist but
