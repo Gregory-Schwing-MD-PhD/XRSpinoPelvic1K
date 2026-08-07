@@ -68,9 +68,30 @@ def main(argv=None):
     ap.add_argument("--test_frac", type=float, default=0.15)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--p_flip", type=float, default=0.5,
-                    help="P(left-right flip). Makes the model indifferent to which way "
-                         "the patient faced; 0 disables.")
+    ap.add_argument("--p_flip", type=float, default=0.0,
+                    help="P(left-right flip). DEFAULT 0 -- see below; >0 is an ablation, "
+                         "not a recommendation.")
+    # WHY 0, when left-right flip is near-universal elsewhere
+    # ------------------------------------------------------
+    # On a LATERAL film, image left-right IS the patient's anterior-posterior axis. The
+    # body is anterior, the spinous process posterior, and lordosis curves one way. A
+    # mirrored lateral is not a rarer view -- it is an anatomy that does not exist. And
+    # the task is precisely "which of these two corners is anterior", so the flip teaches
+    # the model that both answers are right half the time. A mirrored cat is still a cat;
+    # a mirrored spine is not a spine.
+    #
+    # Measured, not assumed: the PLOS One YOLO-Pose study ablated augmentations on lateral
+    # spine radiographs with vertebral landmarks and found horizontal flip the single most
+    # damaging transform tested -- mAP ~63 -> 54 (v8n) and ~66 -> 47 (v11n).
+    #
+    # The original 0.5 here was justified by the DRRs rendering anterior-right while BUU
+    # is anterior-left. That justification was wrong: BUULandmarkDataset already mirrors
+    # BOTH the image and the coordinates into the DRR convention on load (buu.py, the
+    # `self.mirror` branch), so the two streams are the same handedness before augmentation
+    # ever runs. The flip was not reconciling conventions -- there was nothing left to
+    # reconcile -- it was only manufacturing impossible anatomy.
+    #
+    # Kept as a flag so the ablation can be RUN rather than argued about.
     ap.add_argument("--max_rot_deg", type=float, default=8.0,
                     help="random in-plane rotation. Makes the DETECTOR robust to a tilted "
                          "film -- it does NOT make SS/PT valid on one, since both are "

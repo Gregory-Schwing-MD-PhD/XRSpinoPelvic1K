@@ -75,9 +75,12 @@ fi
 echo "[gate] ${_MAN_OK} rendered views carry a bicoxofemoral point"
 
 banner "unified landmark model  (${EPOCHS} epochs)"
+# Passed EXPLICITLY rather than left to the default, so the value that produced a run is
+# in the job log next to its metrics. P_FLIP=0.5 sbatch ... runs the other arm.
 xrun --nv python scripts/train_unified.py \
     --drr "${DRR}" --buu "${BUU}" --out "${RUN_DIR}" \
     --buu_splits "${BUU_SPLITS}" \
+    --p_flip "${P_FLIP:-0.0}" --max_rot_deg "${MAX_ROT_DEG:-8.0}" \
     --epochs "${EPOCHS}" --batch "${BATCH}" ${RESUME}
 
 echo "[unified] done $(date)"
