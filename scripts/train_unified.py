@@ -172,6 +172,25 @@ def main(argv=None):
     os.makedirs(a.out, exist_ok=True)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # A GPU job that silently trains on the CPU is the worst kind of failure: nothing
+    # errors, the log looks normal, and the only symptom is that epochs take 25x longer.
+    # It cost an hour to diagnose once -- msa1 had a GPU in "[GPU requires reset]" state,
+    # so nvidia-smi enumerated it, cuInit returned NO_DEVICE, and torch fell back to CPU
+    # without a word. If the SCHEDULER allocated a GPU, torch must be able to see it.
+    if dev == "cpu" and os.environ.get("SLURM_JOB_GPUS"):
+        sys.exit("\n".join([
+            f"SLURM allocated GPU(s) [{os.environ['SLURM_JOB_GPUS']}] but "
+            f"torch.cuda.is_available() is False -- refusing to train on the CPU.",
+            "  Most likely the node's GPU is in a bad state. Check with:",
+            "    nvidia-smi --query-gpu=index,compute_mode,mig.mode.current,"
+            "memory.used --format=csv",
+            "  '[GPU requires reset]' there means the card needs a root-level reset;",
+            "  resubmit with --exclude=<node> and report the node.",
+            "  To train on CPU deliberately, unset SLURM_JOB_GPUS.",
+        ]))
+    print(f"device: {dev}"
+          + (f" ({torch.cuda.get_device_name(0)})" if dev == "cuda" else ""), flush=True)
+
     ds_va, names = build_union(d_va, b_va, levels=levels, out_size=size,
                                sigma=a.sigma_end, augment=False, seed=a.seed,
                                drr_weight=1, buu_weight=1,
