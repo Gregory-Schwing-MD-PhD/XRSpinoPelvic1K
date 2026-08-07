@@ -104,7 +104,17 @@ fi
 if [[ -n "${_wandb_src}" ]]; then
     [[ -n "${WANDB_API_KEY:-}" ]] && export SINGULARITYENV_WANDB_API_KEY="${WANDB_API_KEY}"
     export SINGULARITYENV_XRSP_WANDB=1
+    # A COMPUTE node may have no route off-site even though the login node does, and
+    # wandb.init() will sit there retrying rather than failing -- which stalls a GPU job
+    # at epoch 0 while holding the allocation. The try/except in the trainer cannot help,
+    # because nothing has raised yet. Bound the wait, then fall back to offline: the run
+    # is spooled under ~/.wandb (bound below) and `wandb sync` uploads it later from the
+    # login node. spinesurg-ct-nnunet carries the same pair of settings.
+    export SINGULARITYENV_WANDB_INIT_TIMEOUT="${WANDB_INIT_TIMEOUT:-90}"
+    export SINGULARITYENV_WANDB_MODE="${WANDB_MODE:-online}"
     echo "[wandb] authenticated via ${_wandb_src} -- run logging enabled"
+    echo "        init timeout ${SINGULARITYENV_WANDB_INIT_TIMEOUT}s; WANDB_MODE=offline"
+    echo "        forces spooling if this node has no route off-site"
 else
     echo "[wandb] no credentials (env, ~/.wandb/token or ~/.netrc) -- logging disabled;"
     echo "        metrics still print to this log. 'wandb login' on the grid enables it."
