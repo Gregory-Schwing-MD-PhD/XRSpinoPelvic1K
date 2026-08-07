@@ -71,7 +71,7 @@ def _params_from_points(pts, levels):
         return {"PI": None, "SS": None, "PT": None, "LL": None}
 
 
-def _predict(net, ds, dev, names, batch=8):
+def _predict(net, ds, dev, names, rows, batch=8):
     """Run the model over a dataset, returning per-item (pred_pts, true_pts).
 
     Ground truth is recovered by arg-maxing the TARGET heatmaps rather than re-reading
@@ -85,7 +85,11 @@ def _predict(net, ds, dev, names, batch=8):
     from xrsp.dataset import collate
     from xrsp.heatmaps import soft_argmax
 
-    out = []
+    # `case` is taken from ROWS, by position, not from meta. The DRR meta is the
+    # <view>_corners.json, which carries "view" but no "case" -- so keying the per-item
+    # CSV on meta alone would silently blank the one column you need to trace an outlier
+    # back to a scan. shuffle=False, so position is exact.
+    out, idx = [], 0
     dl = DataLoader(ds, batch_size=batch, shuffle=False, collate_fn=collate)
     with torch.no_grad():
         for img, hm, valid, meta in dl:
@@ -99,7 +103,12 @@ def _predict(net, ds, dev, names, batch=8):
                         continue                     # unannotated -> not a miss
                     T[n] = [float(tp[b, c, 0]), float(tp[b, c, 1])]
                     P[n] = [float(pp[b, c, 0]), float(pp[b, c, 1])]
-                m = meta[b] if isinstance(meta, (list, tuple)) and b < len(meta) else {}
+                have_meta = isinstance(meta, (list, tuple)) and b < len(meta)
+                m = dict(meta[b]) if have_meta else {}
+                if idx < len(rows):
+                    m.setdefault("case", rows[idx].get("case", ""))
+                    m.setdefault("view", rows[idx].get("view", m.get("view", "")))
+                idx += 1
                 out.append((P, T, m))
     return out
 
@@ -258,7 +267,7 @@ def main(argv=None):
             ds = LandmarkDRRDataset(rows, out_size=size, levels=levels, sigma=2.0,
                                     augment=False)
             # do_params=True: the DRRs are the only set with corners AND hip together.
-            summaries["drr"] = _evaluate(_predict(net, ds, dev, names, a.batch),
+            summaries["drr"] = _evaluate(_predict(net, ds, dev, names, rows, a.batch),
                                          names, levels, "drr", a.out, do_params=True)
     if a.buu:
         rows = [r for r in index_buu(a.buu) if r["case"] in buu_test] if buu_test else []
@@ -266,7 +275,7 @@ def main(argv=None):
             ds = BUULandmarkDataset(rows, levels=levels, out_size=size, sigma=2.0,
                                     augment=False, p_flip=0.0, max_rot_deg=0.0)
             # do_params=False: no hip ground truth on a BUU film, so PI/PT cannot exist.
-            summaries["buu"] = _evaluate(_predict(net, ds, dev, names, a.batch),
+            summaries["buu"] = _evaluate(_predict(net, ds, dev, names, rows, a.batch),
                                          names, levels, "buu", a.out, do_params=False)
 
     if not summaries:
