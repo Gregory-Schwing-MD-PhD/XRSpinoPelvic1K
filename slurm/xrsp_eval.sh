@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:nvidia_h200:1
 #SBATCH --time=04:00:00
 #SBATCH --array=0-4
 #SBATCH --output=logs/xrsp_eval_f%a_%A.out
