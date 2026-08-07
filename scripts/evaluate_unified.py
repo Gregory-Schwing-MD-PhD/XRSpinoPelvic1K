@@ -113,8 +113,16 @@ def _predict(net, ds, dev, names, rows, batch=8):
     return out
 
 
-def _evaluate(items, names, levels, tag, out_dir, do_params):
-    """Metrics + figures for one source. Returns the summary dict."""
+def _evaluate(items, names, levels, tag, out_dir, do_params, corners_trained=True):
+    """Metrics + figures for one source.
+
+    `corners_trained` says whether the corner channels were SUPERVISED in this source's
+    domain. They are not on the DRRs: unified.py gives corners to BUU and the hip point to
+    the DRRs, on disjoint channels. So DRR corner error measures channels that have never
+    seen a DRR -- 85 px median, detection F1 0.22 -- and every angle derived from them is
+    an artefact, not a result. The flag marks them in the summary so nobody reads those
+    numbers as performance, and switches on the hybrid below.
+    """
     from xrsp import evalmetrics as EM
     from xrsp import evalplots as EP
 
@@ -150,12 +158,29 @@ def _evaluate(items, names, levels, tag, out_dir, do_params):
                 gt.get("SS") if gt.get("SS") is not None else float("nan"), T)
             row["roussouly_pred"] = EM.roussouly_type(
                 pr.get("SS") if pr.get("SS") is not None else float("nan"), P)
+            if not corners_trained:
+                # PI and PT need the S1 endplate AND the hip axis on the SAME image, and
+                # no image has both a trained corner channel and hip ground truth. So they
+                # cannot be evaluated end to end at all under the disjoint-channel design.
+                # This substitutes GROUND-TRUTH corners and keeps the PREDICTED hip, which
+                # isolates exactly one thing: how many degrees of PI/PT the hip channel's
+                # error costs. It is not an end-to-end number and is named so it cannot be
+                # mistaken for one.
+                mix = {k: v for k, v in T.items() if k != "bicoxofemoral"}
+                if P.get("bicoxofemoral") is not None:
+                    mix["bicoxofemoral"] = P["bicoxofemoral"]
+                hy = _params_from_points(mix, levels)
+                row["PI_gtcorners_predhip"] = hy.get("PI")
+                row["PT_gtcorners_predhip"] = hy.get("PT")
         rows.append(row)
 
     prec = det["tp"] / (det["tp"] + det["fp"]) if det["tp"] + det["fp"] else float("nan")
     rec = det["tp"] / (det["tp"] + det["fn"]) if det["tp"] + det["fn"] else float("nan")
     summary = {
         "source": tag, "n_items": len(items),
+        # Load-bearing flag, not a note: when false, every corner and angle metric below
+        # describes untrained channels and must not be reported as performance.
+        "corners_trained_in_this_domain": bool(corners_trained),
         "corner_error_px": EM.error_summary(err_all),
         # ED-threshold accuracy: the statistic the keypoint literature reports, so these
         # numbers can sit beside Bansal et al. 2026 without hand-waving. See the caveats
@@ -182,11 +207,16 @@ def _evaluate(items, names, levels, tag, out_dir, do_params):
 
     if do_params:
         pairs, stats, ba = {}, {}, {}
-        for k in ("PI", "SS", "PT", "LL"):
-            t = [r[f"{k}_true"] for r in rows if r.get(f"{k}_true") is not None
-                 and r.get(f"{k}_pred") is not None]
-            p = [r[f"{k}_pred"] for r in rows if r.get(f"{k}_true") is not None
-                 and r.get(f"{k}_pred") is not None]
+        keys = ["PI", "SS", "PT", "LL"]
+        if not corners_trained:
+            keys += ["PI_gtcorners_predhip", "PT_gtcorners_predhip"]
+        for k in keys:
+            base = "PI" if k.startswith("PI") else ("PT" if k.startswith("PT") else k)
+            t = [r[f"{base}_true"] for r in rows if r.get(f"{base}_true") is not None
+                 and r.get(f"{k}_pred" if k == base else k) is not None]
+            p = [r[f"{k}_pred" if k == base else k] for r in rows
+                 if r.get(f"{base}_true") is not None
+                 and r.get(f"{k}_pred" if k == base else k) is not None]
             if len(t) < 2:
                 continue
             pairs[k] = (t, p)
@@ -273,7 +303,8 @@ def main(argv=None):
                                     augment=False)
             # do_params=True: the DRRs are the only set with corners AND hip together.
             summaries["drr"] = _evaluate(_predict(net, ds, dev, names, rows, a.batch),
-                                         names, levels, "drr", a.out, do_params=True)
+                                         names, levels, "drr", a.out, do_params=True,
+                                         corners_trained=False)
     if a.buu:
         rows = [r for r in index_buu(a.buu) if r["case"] in buu_test] if buu_test else []
         if rows:
@@ -281,7 +312,11 @@ def main(argv=None):
                                     augment=False, p_flip=0.0, max_rot_deg=0.0)
             # do_params=False: no hip ground truth on a BUU film, so PI/PT cannot exist.
             summaries["buu"] = _evaluate(_predict(net, ds, dev, names, rows, a.batch),
-                                         names, levels, "buu", a.out, do_params=False)
+                                         # SS and LL need ONLY corners, so both are
+                                         # computable on real film. spinopelvic_summary_2d
+                                         # returns None for PI/PT with no femoral point,
+                                         # so enabling this cannot fabricate them.
+                                         names, levels, "buu", a.out, do_params=True)
 
     # Training curves live beside the checkpoint, not with a source, so they are plotted
     # once rather than per source.
@@ -299,15 +334,38 @@ def main(argv=None):
     json.dump({"model": os.path.abspath(a.model), "levels": levels, **summaries},
               open(os.path.join(a.out, "summary.json"), "w"), indent=2, default=str)
     for tag, s in summaries.items():
-        print(f"\n[{tag}] n={s['n_items']}  corner median "
-              f"{s['corner_error_px']['median']:.2f}px  det-F1 {s['detection']['f1']:.3f}"
-              f"  corner-identity macro-F1 {s['corner_identity']['macro_f1']:.3f}")
-        if "parameters" in s:
-            for k, v in s["parameters"].items():
-                print(f"    {k:3s} ICC {v['icc']:.3f}  MAE {v['mae']:.2f}deg  "
-                      f"<=5deg {100*v['within_5deg']:.0f}%")
+        trained = s.get("corners_trained_in_this_domain", True)
+        print(f"\n[{tag}] n={s['n_items']}")
+        if not trained:
+            print("    !! CORNER CHANNELS WERE NOT TRAINED IN THIS DOMAIN.")
+            print("       unified.py supervises corners from BUU and the hip point from")
+            print("       the DRRs, on disjoint channels. Every corner and angle number")
+            print("       below therefore measures untrained channels -- report NONE of")
+            print("       them. The hip error and the *_gtcorners_predhip rows are valid.")
+        print(f"    corner median {s['corner_error_px']['median']:.2f}px  "
+              f"det-F1 {s['detection']['f1']:.3f}  "
+              f"identity macro-F1 {s['corner_identity']['macro_f1']:.3f}"
+              f"{'   <- not a result' if not trained else ''}")
+        ed = s["corner_ed_accuracy"]
+        print(f"    corners within  5px {100*ed['within_5px']:.1f}%  "
+              f"10px {100*ed['within_10px']:.1f}%  15px {100*ed['within_15px']:.1f}%"
+              + ("   [Bansal 2026: 75-79 / ~98 / ~100 on 640x640]" if trained else ""))
+        he = s["hip_error_px"]
+        if he["n"]:
+            print(f"    hip point   median {he['median']:.2f}px  p95 {he['p95']:.2f}px"
+                  f"   (trained on this domain -- VALID)")
+        for k, v in (s.get("parameters") or {}).items():
+            note = ""
+            if k.endswith("_gtcorners_predhip"):
+                note = "  <- GT corners + predicted hip: isolates the hip channel"
+            elif not trained:
+                note = "  <- artefact"
+            print(f"    {k:22s} ICC {v['icc']:6.3f}  MAE {v['mae']:6.2f}deg  "
+                  f"<=5deg {100*v['within_5deg']:3.0f}%{note}")
+        if "roussouly" in s:
             print(f"    Roussouly macro-F1 {s['roussouly']['macro_f1']:.3f}  "
-                  f"kappa {s['roussouly']['kappa']:.3f}")
+                  f"kappa {s['roussouly']['kappa']:.3f}"
+                  f"{'  <- artefact' if not trained else ''}")
     print(f"\nfigures + summary.json -> {a.out}")
     return 0
 
