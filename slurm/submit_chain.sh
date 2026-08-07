@@ -10,6 +10,7 @@
 #   stage 1  generate    DRRs + landmarks          (array 0-19, CPU)  after 0
 #   stage 2  buu splits  buu_splits.json           (CPU)              after 0
 #   stage 3  unified     the landmark model        (GPU)              after 1 AND 2
+#   stage 4  evaluate    held-out metrics + figures (CPU)            after 3
 #
 # 1 and 2 both depend only on the container, so they run CONCURRENTLY; 3 waits
 # for both. afterok throughout -- a failed stage stops everything downstream
@@ -175,15 +176,18 @@ J2=$(_sub "buu splits" "afterok:${J0}"     slurm/xrsp_buu_splits.sh)
 echo "  stage 2  buu splits   ${J2}   after ${J0}"
 J3=$(_sub "unified"    "afterok:${J1}:${J2}" slurm/xrsp_unified.sh)
 echo "  stage 3  unified      ${J3}   after ${J1} and ${J2}"
+J4=$(_sub "evaluate"   "afterok:${J3}"     slurm/xrsp_eval_unified.sh)
+echo "  stage 4  evaluate     ${J4}   after ${J3}"
 
 cat <<EOF
 
 === submitted ============================================================
   watch:    squeue -u \$USER
   logs:     tail -f logs/xrsp_sif_${J0}.out
-  cancel:   scancel ${J0} ${J1} ${J2} ${J3}
+  cancel:   scancel ${J0} ${J1} ${J2} ${J3} ${J4}
 
   --kill-on-invalid-dep=yes is set, so if a stage fails its dependents are
   CANCELLED rather than left queued forever in DependencyNeverSatisfied.
-  Check with:  sacct -j ${J0},${J1},${J2},${J3} --format=JobID,JobName%16,State,Elapsed
+  results:  results/unified/ (figures as .pdf and .png, plus summary.json)
+  Check with:  sacct -j ${J0},${J1},${J2},${J3},${J4} --format=JobID,JobName%16,State,Elapsed
 EOF
