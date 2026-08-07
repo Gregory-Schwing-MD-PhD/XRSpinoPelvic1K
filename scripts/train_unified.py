@@ -197,13 +197,30 @@ def main(argv=None):
                                p_flip=0.0, max_rot_deg=0.0)   # val is never augmented
     net = build_unet(len(names), features=(16, 32, 64, 128, 256)).to(dev)
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr)
+    # SELECTION IS ON LANDMARK ERROR IN PIXELS, NOT ON VAL LOSS.
+    #
+    # MSE over sparse Gaussian heatmaps is minimised by predicting NOTHING. The targets
+    # are ~99% background, so an all-zero output scores well, and once the model starts
+    # emitting peaks a slightly misplaced peak costs roughly TWICE the energy of no peak
+    # at all. Val loss therefore rises while localisation improves.
+    #
+    # Measured, not theorised: on run 39879345 val loss was lowest at epoch 0 (0.00063,
+    # all 38.9 px) and had risen by epoch 29 (0.00078) while error fell to 3.1 px. Since
+    # best.pt was kept on val loss, best.pt WAS THE UNTRAINED NETWORK -- and the whole
+    # evaluation stage runs on best.pt.
+    #
+    # Mean radial error is the quantity the model exists to minimise, so select on it.
+    # Val loss is still logged; it is a diagnostic, not a criterion.
     start_ep, best = 0, float("inf")
     if a.resume and os.path.exists(a.resume):
         ck = torch.load(a.resume, map_location=dev, weights_only=False)
         net.load_state_dict(ck["model"])
         opt.load_state_dict(ck["opt"])
-        start_ep, best = int(ck.get("epoch", 0)) + 1, float(ck.get("best", float("inf")))
-        print(f"resumed from {a.resume} at epoch {start_ep}")
+        start_ep = int(ck.get("epoch", 0)) + 1
+        # Deliberately NOT ck["best"]: an older checkpoint's `best` is a val LOSS, and
+        # comparing a pixel error against it would keep every future checkpoint out.
+        best = float(ck.get("best_err_px", float("inf")))
+        print(f"resumed from {a.resume} at epoch {start_ep} (best err {best})")
 
     json.dump({"levels": levels, "names": names, "size": list(size),
                "drr_test": [r["case"] for r in d_te],
@@ -326,17 +343,21 @@ def main(argv=None):
                                         else float("nan")),
                      "val/hip_supervised": int(bool(hip_errs)),
                      "val/best_loss": min(best, vl)}, step=ep)
+        # The selection metric: mean radial error over every supervised landmark.
+        # nan (no finite errors this epoch) must never win -- inf keeps it out.
+        sel = float(np.mean(errs)) if errs and np.isfinite(np.mean(errs)) else float("inf")
         ck = {"model": net.state_dict(), "opt": opt.state_dict(), "epoch": ep,
-              "best": best, "names": names, "size": list(size),
+              "best_err_px": best, "val_loss": vl, "names": names, "size": list(size),
               "features": [16, 32, 64, 128, 256]}
         torch.save(ck, os.path.join(a.out, "last.pt"))      # resume point, every epoch
-        if vl < best:
-            best = vl
-            ck["best"] = best
+        if sel < best:
+            best = sel
+            ck["best_err_px"] = best
             torch.save(ck, os.path.join(a.out, "best.pt"))
-    print(f"best val {best:.5f}  ->  {os.path.join(a.out, 'best.pt')}")
+            print(f"    * best so far: {best:.2f}px -> best.pt", flush=True)
+    print(f"best landmark error {best:.2f}px  ->  {os.path.join(a.out, 'best.pt')}")
     if run is not None:
-        run.summary["best_val_loss"] = best
+        run.summary["best_landmark_err_px"] = best
         run.finish()
     return 0
 
