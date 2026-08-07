@@ -341,7 +341,12 @@ def main(argv=None):
                      "val/err_all_px": float(np.mean(errs)) if errs else float("nan"),
                      "val/err_hip_px": (float(np.mean(hip_errs)) if hip_errs
                                         else float("nan")),
-                     "val/hip_supervised": int(bool(hip_errs)),
+                     # FRACTION of val batches carrying a supervised hip channel, not a
+                     # boolean. As a 0/1 it only fires on TOTAL loss of hip supervision;
+                     # if half the DRRs silently lost their femoral fit it still read 1.
+                     # A fraction shows partial degradation, which is the version of this
+                     # failure that would otherwise be invisible.
+                     "val/hip_supervised": len(hip_errs) / max(1, len(dl_va)),
                      "val/best_loss": min(best, vl)}, step=ep)
         # Per-epoch history to disk, APPENDED, so the curve survives the job.
         # Printing it only into the SLURM log means the training curve exists solely as
@@ -351,12 +356,12 @@ def main(argv=None):
         if not os.path.exists(hist):
             with open(hist, "w") as fh:
                 print("epoch,sigma,train_loss,val_loss,err_all_px,err_hip_px,"
-                      "hip_supervised", file=fh)
+                      "hip_supervised_frac", file=fh)
         with open(hist, "a") as fh:
             print(f"{ep},{sig:.4f},{tl/max(1,nb):.8f},{vl:.8f},"
                   f"{np.mean(errs) if errs else float('nan'):.4f},"
                   f"{np.mean(hip_errs) if hip_errs else float('nan'):.4f},"
-                  f"{int(bool(hip_errs))}", file=fh)
+                  f"{len(hip_errs)/max(1,len(dl_va)):.4f}", file=fh)
 
         # The selection metric: mean radial error over every supervised landmark.
         # nan (no finite errors this epoch) must never win -- inf keeps it out.
