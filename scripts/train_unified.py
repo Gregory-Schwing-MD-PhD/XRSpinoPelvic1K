@@ -343,6 +343,21 @@ def main(argv=None):
                                         else float("nan")),
                      "val/hip_supervised": int(bool(hip_errs)),
                      "val/best_loss": min(best, vl)}, step=ep)
+        # Per-epoch history to disk, APPENDED, so the curve survives the job.
+        # Printing it only into the SLURM log means the training curve exists solely as
+        # text a human has to re-parse -- and it is lost entirely if the log rotates or
+        # the job is requeued into a new %A. The evaluator plots this file.
+        hist = os.path.join(a.out, "history.csv")
+        if not os.path.exists(hist):
+            with open(hist, "w") as fh:
+                print("epoch,sigma,train_loss,val_loss,err_all_px,err_hip_px,"
+                      "hip_supervised", file=fh)
+        with open(hist, "a") as fh:
+            print(f"{ep},{sig:.4f},{tl/max(1,nb):.8f},{vl:.8f},"
+                  f"{np.mean(errs) if errs else float('nan'):.4f},"
+                  f"{np.mean(hip_errs) if hip_errs else float('nan'):.4f},"
+                  f"{int(bool(hip_errs))}", file=fh)
+
         # The selection metric: mean radial error over every supervised landmark.
         # nan (no finite errors this epoch) must never win -- inf keeps it out.
         sel = float(np.mean(errs)) if errs and np.isfinite(np.mean(errs)) else float("inf")

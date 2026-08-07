@@ -283,6 +283,16 @@ def main(argv=None):
             summaries["buu"] = _evaluate(_predict(net, ds, dev, names, rows, a.batch),
                                          names, levels, "buu", a.out, do_params=False)
 
+    # Training curves live beside the checkpoint, not with a source, so they are plotted
+    # once rather than per source.
+    hist = os.path.join(os.path.dirname(os.path.abspath(a.model)), "history.csv")
+    if os.path.exists(hist):
+        from xrsp import evalplots as EP
+        EP.plot_training_curves(hist, a.out)
+        print(f"training curves <- {hist}")
+    else:
+        print(f"no history.csv beside the checkpoint -- training curves skipped")
+
     if not summaries:
         sys.exit("no held-out items were evaluated -- check --drr/--buu point at the "
                  "same data the run_config.json test lists came from.")

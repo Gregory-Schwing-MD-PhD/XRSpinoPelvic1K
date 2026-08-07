@@ -241,3 +241,46 @@ def plot_identity_residual(pi: Sequence[float], ss: Sequence[float],
     ax.set_ylabel("cases")
     ax.grid(alpha=0.22, lw=0.5)
     return _save(fig, out_dir, stem)
+
+
+def plot_training_curves(history_csv: str, out_dir: str,
+                         stem: str = "fig_training_curves"):
+    """Train/val loss and landmark error per epoch, on twin axes.
+
+    Both are plotted together deliberately, because on this task they DISAGREE and the
+    disagreement is the point. MSE over sparse Gaussian heatmaps is minimised by
+    predicting nothing, so val loss can rise while localisation improves -- which is
+    exactly what happened here (val loss lowest at epoch 0 with 38.9 px error). A figure
+    showing only the loss curve would look like textbook overfitting and would be read as
+    "stop earlier", which is the opposite of correct. Showing the error beside it makes
+    the divergence visible rather than a footnote.
+    """
+    import csv as _csv
+    plt = _mpl()
+    rows = list(_csv.DictReader(open(history_csv)))
+    if not rows:
+        return []
+    ep = [int(r["epoch"]) for r in rows]
+    f = lambda k: [float(r[k]) if r[k] not in ("", "nan") else np.nan for r in rows]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.0, 2.8))
+    ax1.plot(ep, f("train_loss"), color=C_MAIN, lw=1.4, label="train")
+    ax1.plot(ep, f("val_loss"), color=C_WARN, lw=1.4, label="val")
+    ax1.set_yscale("log")
+    ax1.set_xlabel("epoch"); ax1.set_ylabel("masked MSE (log)")
+    ax1.set_title("loss")
+    ax1.legend(frameon=False)
+    ax1.grid(alpha=0.25, lw=0.5)
+
+    ax2.plot(ep, f("err_all_px"), color=C_MAIN, lw=1.4, label="all landmarks")
+    ax2.plot(ep, f("err_hip_px"), color=C_ALT, lw=1.4, label="hip point")
+    best = int(np.nanargmin(f("err_all_px")))
+    ax2.axvline(ep[best], color=C_GREY, lw=0.8, ls=":")
+    ax2.annotate("best.pt\nep %d" % ep[best], (ep[best], np.nanmin(f("err_all_px"))),
+                 xytext=(6, 14), textcoords="offset points", fontsize=7, color=C_GREY)
+    ax2.set_xlabel("epoch"); ax2.set_ylabel("mean radial error (px)")
+    ax2.set_title("localisation error  (selection metric)")
+    ax2.legend(frameon=False)
+    ax2.grid(alpha=0.25, lw=0.5)
+    fig.tight_layout()
+    return _save(fig, out_dir, stem)
