@@ -100,6 +100,11 @@ def main(argv=None):
                     help="splits.json from make_buu_splits.py. Strongly preferred over "
                          "the seed-derived split.")
     ap.add_argument("--resume", default=None, help="checkpoint to resume (preemption)")
+    ap.add_argument("--workers", type=int, default=-1,
+                    help="DataLoader worker processes. -1 = derive from "
+                         "SLURM_CPUS_PER_TASK. Every sample builds 61 Gaussian heatmaps "
+                         "at full resolution in numpy, so with 0 workers the GPU starves "
+                         "and an H200 runs no faster than a V100.")
     ap.add_argument("--no_wandb", action="store_true",
                     help="disable W&B even when WANDB_API_KEY is set. Logging is "
                          "otherwise enabled by the presence of the token alone, so "
@@ -187,7 +192,21 @@ def main(argv=None):
                "buu_splits_file": a.buu_splits,
                "args": vars(a)},
               open(os.path.join(a.out, "run_config.json"), "w"), indent=2)
-    dl_va = DataLoader(ds_va, batch_size=a.batch, collate_fn=collate)
+    # Leave 2 cores for the main process and the CUDA runtime. This is not a tuning
+    # nicety: with 0 workers, one Python process builds 61 channels x 512 x 256 of
+    # Gaussians per sample, and the measured result was 14 min/epoch with the H200 at
+    # 1.3% memory and effectively idle -- 150 epochs would be 35 h against a 24 h wall.
+    nw = a.workers if a.workers >= 0 else         max(0, min(10, int(os.environ.get("SLURM_CPUS_PER_TASK", "4")) - 2))
+    print(f"dataloader workers: {nw}", flush=True)
+    _dl = dict(num_workers=nw, pin_memory=(dev == "cuda"))
+    if nw > 0:
+        _dl["prefetch_factor"] = 4
+    # The VAL loader is built once, so its workers can persist across epochs. The TRAIN
+    # loader cannot: it is rebuilt every epoch for the sigma anneal, and persistent
+    # workers hold a stale copy of the dataset -- they would keep serving the sigma the
+    # run started with while the log claimed it was annealing.
+    dl_va = DataLoader(ds_va, batch_size=a.batch, collate_fn=collate,
+                       persistent_workers=(nw > 0), **_dl)
     fem_i = names.index(FEMORAL_KEY)
 
     # ── W&B, opt-in by the PRESENCE OF A TOKEN, not by a flag ────────────────────
@@ -242,7 +261,8 @@ def main(argv=None):
                                augment=True, seed=a.seed + ep,
                                drr_weight=a.drr_weight, buu_weight=a.buu_weight,
                                p_flip=a.p_flip, max_rot_deg=a.max_rot_deg)
-        dl_tr = DataLoader(ds_tr, batch_size=a.batch, shuffle=True, collate_fn=collate)
+        dl_tr = DataLoader(ds_tr, batch_size=a.batch, shuffle=True, collate_fn=collate,
+                           **_dl)
         net.train()
         tl, nb = 0.0, 0
         for img, hm, valid, _ in dl_tr:
