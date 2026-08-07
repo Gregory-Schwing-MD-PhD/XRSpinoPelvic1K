@@ -92,6 +92,29 @@ def error_summary(err: Sequence[float]) -> Dict:
             "max": float(e.max())}
 
 
+def ed_accuracy(err: Sequence[float], thresholds=(5.0, 10.0, 15.0)) -> Dict:
+    """Fraction of landmarks within each pixel threshold -- the statistic the vertebral
+    keypoint literature reports, so results can be placed beside it directly.
+
+    Bansal et al. (PLoS One 2026, e0347290) give ED<=5 px 75-79%, <=10 px ~98%, <=15 px
+    ~100% for YOLOv8n/v11n-Pose and Detectron2 on 698 lateral lumbar films.
+
+    READ THE COMPARISON CAREFULLY, because two things make it not like-for-like:
+      * their images are resized to 640x640 NON-UNIFORMLY, so a pixel there is not a
+        fixed physical distance and differs between x and y. Ours are 512x256 at a known
+        mm/px. Equal pixel counts are not equal millimetres.
+      * their keypoint metrics are computed only inside bounding boxes already matched at
+        IoU>=0.5, so vertebrae they failed to detect are excluded from the keypoint score.
+        Nothing here filters that way; a missed landmark counts against detection F1.
+    Reported anyway, with those caveats, because an imperfect stated comparison beats an
+    unstated one -- and mm is also reported when the pixel spacing is known.
+    """
+    e = np.asarray([v for v in err if np.isfinite(v)], float)
+    if e.size == 0:
+        return {f"within_{int(t)}px": float("nan") for t in thresholds}
+    return {f"within_{int(t)}px": float((e <= t).mean()) for t in thresholds}
+
+
 def ced_curve(err: Sequence[float], max_px: float = 20.0, n: int = 200):
     """Cumulative error distribution: fraction of landmarks within a threshold.
 

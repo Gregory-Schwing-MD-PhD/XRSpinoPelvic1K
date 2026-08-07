@@ -157,7 +157,12 @@ def _evaluate(items, names, levels, tag, out_dir, do_params):
     summary = {
         "source": tag, "n_items": len(items),
         "corner_error_px": EM.error_summary(err_all),
+        # ED-threshold accuracy: the statistic the keypoint literature reports, so these
+        # numbers can sit beside Bansal et al. 2026 without hand-waving. See the caveats
+        # in evalmetrics.ed_accuracy -- their pixels are not ours.
+        "corner_ed_accuracy": EM.ed_accuracy(err_all),
         "hip_error_px": EM.error_summary(err_hip),
+        "hip_ed_accuracy": EM.ed_accuracy(err_hip),
         "detection": {**det, "precision": prec, "recall": rec,
                       "f1": (2 * prec * rec / (prec + rec)
                              if np.isfinite(prec) and np.isfinite(rec) and prec + rec > 0
