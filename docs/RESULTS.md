@@ -124,18 +124,36 @@ damaging augmentation on this task.
 
 These cost real compute and each one closes a direction.
 
-**Pelvic incidence is not obtainable from BUU.** BUU is a lumbar series collimated on
-L1–S1. Femoral heads are inside the image bounds on 99.8 % of films (median 3.78
-S1-endplate lengths of margin below S1) but are **outside the exposed anatomy** — there is
-no cortical arc to find. A pelvis class trained on DRRs fires on **40/40 DRR test images at
-0.94 confidence and 0/40 real films**, with exactly one detection at 0.010 when the
-threshold is dropped 250×. Vertebrae detect normally on both, so this is not a loading or
-class-index fault. PI needs a dataset whose films include the hips.
+**A pelvis class trained only on DRRs does not transfer to real film.** It fires on
+**40/40 DRR test images at 0.94 confidence and 0/40 real films**, with exactly one
+detection at 0.010 when the threshold is dropped 250×. Vertebrae detect normally on both
+(359 vs 243 instances), so this is not a loading fault, a class-index fault, or a
+threshold artefact — it is specifically the class with no real-domain supervision, and at
+inference it does not exist.
+
+Femoral heads ARE within the exposed field. They lie inside the image bounds on 99.8 % of
+films (median 3.78 S1-endplate lengths of margin below S1), and inspection of the expected
+region at full resolution shows cortical arcs consistent with femoral head and acetabulum
+on a substantial fraction. They are low-contrast and superimposed with bowel gas — hard,
+not absent.
+
+> **Retraction.** An earlier draft of this section claimed the heads were *outside the
+> exposed anatomy* and that PI was therefore unobtainable from BUU. That was inferred from
+> downsampled thumbnails plus the zero-detection result — and the second is circular, since
+> a model that cannot cross the synthetic-to-real gap finds nothing whether or not a head
+> is visible. Full-resolution inspection contradicts it.
+
+What remains open is a question only a reader can settle: on what fraction of films can a
+trained eye place the centre with acceptable confidence? The annotation pilot answers it
+directly — the skip rate *is* that measurement — and PI on BUU stands or falls on that
+number rather than on any automatic method's opinion.
 
 **The classical circle fit is not a usable pseudolabeller.** `xrsp/hipfit.py` "converged"
-on 301/301 films — which is the warning sign, not the result. Against the anatomically
-expected femoral-head location it sits a median **0.54 S1-lengths** away, with only 45 %
-within 0.5. It is fitting soft-tissue texture.
+on 301/301 films — the warning sign rather than the result, since it always returns some
+circle. Against the anatomically expected femoral-head location it sits a median **0.54
+S1-lengths** away, with only 45 % within 0.5. Whether that reflects a poor fit or a poor
+"expected location" prior cannot be separated without human annotation, so it is reported
+as unreliable rather than as measured error.
 
 **Mixing synthetic DRRs into training degraded real-film accuracy.** The combined run is
 worst or near-worst on every corner column (ED5 18.2 % vs 33.2 %; SS MAE 2.64° vs 2.01°).
