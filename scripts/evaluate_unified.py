@@ -71,6 +71,59 @@ def _params_from_points(pts, levels):
         return {"PI": None, "SS": None, "PT": None, "LL": None}
 
 
+LUMBAR_ORDER = ["L1", "L2", "L3", "L4", "L5", "L6", "S1"]
+
+
+def _ll_robust(pts, levels):
+    """Lumbar lordosis from a least-squares fit over EVERY available endplate.
+
+    The textbook LL is the Cobb angle between the most cranial and most caudal lumbar
+    endplates -- so it rests on exactly two measurements and inherits both their errors in
+    full. On this model those two are the WORST two: per-level median radial error is
+    1.15-1.20 px at L3/L4 but 1.96 px at S1 and 1.35 px at L1, and LL is measured between
+    S1 and L1. That is why LL fails (>10 deg on 8.3% of films) where SS fails on 3.0%.
+
+    Endplate inclination varies smoothly and near-linearly down the lumbar spine, so a
+    line through (level index, endplate angle) estimates the two end angles using every
+    endplate rather than two.
+
+    The slope is THEIL-SEN -- the median of all pairwise slopes -- not least squares.
+    Least squares is not robust here and testing showed it is WORSE than the two-point
+    Cobb: the endpoints carry the highest leverage, so wrecking the S1 endplate by 40 deg
+    moved an LS estimate from 41 to 75 deg, amplifying exactly the error it was meant to
+    absorb. Theil-Sen has a 29% breakdown point and the intercept is taken as the median
+    residual, so one bad endplate is outvoted instead of steering the fit.
+
+    Returns None below 4 endplates -- with 3 the fit has almost no redundancy and would
+    simply launder the same noise through a regression.
+    """
+    # Index by POSITION AMONG THE LEVELS PRESENT, not by position in LUMBAR_ORDER. L6 is
+    # absent in most spines, and a fixed ordering leaves a gap there: L5->S1 then spans two
+    # index units for one anatomical level, which flattens the fitted slope and stretches
+    # the span. On a clean synthetic lordosis that turned a true 40 deg into 48.
+    ang, idx = [], []
+    present = [lv for lv in LUMBAR_ORDER if lv in levels]
+    for i, lv in enumerate(present):
+        a, q = pts.get(f"{lv}.sup_ant"), pts.get(f"{lv}.sup_post")
+        if a is None or q is None or not (np.all(np.isfinite(a)) and np.all(np.isfinite(q))):
+            continue
+        d = np.asarray(a, float) - np.asarray(q, float)
+        ang.append(float(np.degrees(np.arctan2(d[1], d[0]))))
+        idx.append(i)
+    if len(ang) < 4:
+        return None
+    ang = np.unwrap(np.radians(ang))          # no 180 deg wrap mid-column
+    x = np.asarray(idx, float)
+    slopes = [(ang[j] - ang[i]) / (x[j] - x[i])
+              for i in range(len(x)) for j in range(i + 1, len(x)) if x[j] != x[i]]
+    if not slopes:
+        return None
+    m = float(np.median(slopes))
+    # The span is what LL is: slope x (levels between the ends). The intercept cancels,
+    # so only the robust slope matters.
+    return float(abs(np.degrees(m * (x.max() - x.min()))))
+
+
 def _predict(net, ds, dev, names, rows, batch=8):
     """Run the model over a dataset, returning per-item (pred_pts, true_pts).
 
@@ -94,22 +147,27 @@ def _predict(net, ds, dev, names, rows, batch=8):
     with torch.no_grad():
         for img, hm, valid, meta in dl:
             pred = net(img.to(dev)).cpu()
-            pp, _ = soft_argmax(pred)
+            pp, pc = soft_argmax(pred)
             tp, _ = soft_argmax(hm)
             for b in range(img.shape[0]):
-                P, T = {}, {}
+                P, T, C = {}, {}, {}
                 for c, n in enumerate(names):
                     if not bool(valid[b, c]):
                         continue                     # unannotated -> not a miss
                     T[n] = [float(tp[b, c, 0]), float(tp[b, c, 1])]
                     P[n] = [float(pp[b, c, 0]), float(pp[b, c, 1])]
+                    # Peak height BEFORE normalisation. The only per-landmark signal the
+                    # network offers about its own certainty, and it was being thrown
+                    # away -- which left no way to tell a confident-and-wrong prediction
+                    # (SS 23.8 -> 71.9) from a confident-and-right one.
+                    C[n] = float(pc[b, c])
                 have_meta = isinstance(meta, (list, tuple)) and b < len(meta)
                 m = dict(meta[b]) if have_meta else {}
                 if idx < len(rows):
                     m.setdefault("case", rows[idx].get("case", ""))
                     m.setdefault("view", rows[idx].get("view", m.get("view", "")))
                 idx += 1
-                out.append((P, T, m))
+                out.append((P, T, C, m))
     return out
 
 
@@ -129,8 +187,8 @@ def _evaluate(items, names, levels, tag, out_dir, do_params, corners_trained=Tru
     err_all, err_by_level, err_hip = [], {lv: [] for lv in levels}, []
     conf4 = np.zeros((4, 4), int)
     det = {"tp": 0, "fp": 0, "fn": 0}
-    rows = []
-    for P, T, meta in items:
+    rows, lm_rows = [], []
+    for P, T, CONF, meta in items:
         for n in names:
             t, p = T.get(n), P.get(n)
             if t is None:
@@ -154,6 +212,11 @@ def _evaluate(items, names, levels, tag, out_dir, do_params, corners_trained=Tru
             pr = _params_from_points(P, levels)
             for k in ("PI", "SS", "PT", "LL"):
                 row[f"{k}_true"], row[f"{k}_pred"] = gt.get(k), pr.get(k)
+            # Reported ALONGSIDE the textbook LL, never instead of it: the two-endplate
+            # Cobb is what the literature reports and what a reader would measure, so
+            # replacing it silently would make the number incomparable.
+            row["LLrobust_true"] = _ll_robust(T, levels)
+            row["LLrobust_pred"] = _ll_robust(P, levels)
             row["roussouly_true"] = EM.roussouly_type(
                 gt.get("SS") if gt.get("SS") is not None else float("nan"), T)
             row["roussouly_pred"] = EM.roussouly_type(
@@ -173,6 +236,15 @@ def _evaluate(items, names, levels, tag, out_dir, do_params, corners_trained=Tru
                 row["PI_gtcorners_predhip"] = hy.get("PI")
                 row["PT_gtcorners_predhip"] = hy.get("PT")
         rows.append(row)
+        for n in names:
+            t, p = T.get(n), P.get(n)
+            if t is None:
+                continue
+            d = (float(np.linalg.norm(np.asarray(p, float) - np.asarray(t, float)))
+                 if p is not None and np.all(np.isfinite(p)) else float("nan"))
+            lm_rows.append({"case": row["case"], "channel": n,
+                            "level": n.split(".")[0], "err_px": d,
+                            "confidence": CONF.get(n, float("nan"))})
 
     prec = det["tp"] / (det["tp"] + det["fp"]) if det["tp"] + det["fp"] else float("nan")
     rec = det["tp"] / (det["tp"] + det["fn"]) if det["tp"] + det["fn"] else float("nan")
@@ -207,11 +279,12 @@ def _evaluate(items, names, levels, tag, out_dir, do_params, corners_trained=Tru
 
     if do_params:
         pairs, stats, ba = {}, {}, {}
-        keys = ["PI", "SS", "PT", "LL"]
+        keys = ["PI", "SS", "PT", "LL", "LLrobust"]
         if not corners_trained:
             keys += ["PI_gtcorners_predhip", "PT_gtcorners_predhip"]
         for k in keys:
-            base = "PI" if k.startswith("PI") else ("PT" if k.startswith("PT") else k)
+            base = ("PI" if k.startswith("PI")
+                    else "PT" if k.startswith("PT") else k)
             t = [r[f"{base}_true"] for r in rows if r.get(f"{base}_true") is not None
                  and r.get(f"{k}_pred" if k == base else k) is not None]
             p = [r[f"{k}_pred" if k == base else k] for r in rows
@@ -245,11 +318,20 @@ def _evaluate(items, names, levels, tag, out_dir, do_params, corners_trained=Tru
         EP.plot_confusion(M, list(EM.ROUSSOULY_TYPES), out_dir,
                           stem=f"fig_roussouly_{tag}", title=f"Roussouly type — {tag}",
                           prf=EM.prf_from_confusion(M), dropped=dropped)
-        EP.plot_identity_residual([r.get("PI_pred") for r in rows],
-                                  [r.get("SS_pred") for r in rows],
-                                  [r.get("PT_pred") for r in rows],
-                                  out_dir, stem=f"fig_pi_identity_{tag}")
+        # PI = SS + PT needs both, and on a source with no hip ground truth PI/PT are
+        # None for every row -- the figure would be an empty axis presented as a result.
+        if any(r.get("PI_pred") is not None for r in rows):
+            EP.plot_identity_residual([r.get("PI_pred") for r in rows],
+                                      [r.get("SS_pred") for r in rows],
+                                      [r.get("PT_pred") for r in rows],
+                                      out_dir, stem=f"fig_pi_identity_{tag}")
 
+    if lm_rows:
+        with open(os.path.join(out_dir, f"per_landmark_{tag}.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["case", "channel", "level", "err_px",
+                                              "confidence"])
+            w.writeheader()
+            w.writerows(lm_rows)
     if rows:
         with open(os.path.join(out_dir, f"per_item_{tag}.csv"), "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=sorted({k for r in rows for k in r}))
