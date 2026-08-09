@@ -50,6 +50,12 @@ RUN pip install --no-cache-dir \
 
 RUN pip install --no-cache-dir "wandb>=0.12.10"
 
+# ── YOLO-Pose baseline (Ultralytics) ─────────────────────────────────────────
+# Pinned to the version in Bansal et al. 2026 Table 3, so the baseline is the software
+# they actually ran rather than whatever is current. Pure python on top of the torch
+# already installed above, so this layer is seconds and leaves everything expensive cached.
+RUN pip install --no-cache-dir "ultralytics==8.3.159"
+
 # ── OpenSpineToolkit — the 3-D endplate fit the labels come from ─────────────
 # Endplate corners are fitted in 3-D (medial band + outlier rejection, which drops
 # the sacral ala) and then projected. Fitting them from the 2-D silhouette instead
@@ -80,9 +86,10 @@ ENV MPLBACKEND=Agg
 
 # ── Smoke test: fail the BUILD, not the 48-hour grid job ─────────────────────
 RUN python3 -c "\
-import torch, monai, pytorch_lightning as pl, nibabel, scipy, PIL; \
+import torch, monai, pytorch_lightning as pl, nibabel, scipy, PIL, ultralytics; \
 from monai.networks.nets import BasicUNet; \
-print(f'torch={torch.__version__} monai={monai.__version__} lightning={pl.__version__}'); \
+from ultralytics import YOLO; \
+print(f'torch={torch.__version__} monai={monai.__version__} lightning={pl.__version__} ultralytics={ultralytics.__version__}'); \
 BasicUNet(spatial_dims=2, in_channels=1, out_channels=8, features=(8,8,8,8,8,8)); \
 print('BasicUNet 2-D: OK')"
 
