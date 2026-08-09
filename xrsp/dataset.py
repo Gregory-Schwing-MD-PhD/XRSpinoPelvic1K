@@ -102,10 +102,21 @@ class LandmarkDRRDataset:
                                self.names)
         H0, W0 = img.shape
         H, W = self.out_size
-        sy, sx = H / H0, W / W0
-        if (H, W) != (H0, W0):
-            img = zoom(img, (sy, sx), order=1)
-            pts = {k: (None if v is None else [v[0] * sx, v[1] * sy]) for k, v in pts.items()}
+        # LETTERBOX -- one uniform scale, then pad. See xrsp/buu.py for the measurement:
+        # scaling x and y independently to fill the frame distorts every angle in the
+        # image (a true 45 deg endplate rendered at 58 deg), and by a different amount per
+        # case. The DRRs feed the same channels and the same angle computation as BUU, so
+        # the two loaders must agree on geometry or the model is trained on two conventions.
+        s = min(H / H0, W / W0)
+        nh, nw = max(1, int(round(H0 * s))), max(1, int(round(W0 * s)))
+        img = zoom(img, (nh / H0, nw / W0), order=1)
+        oy, ox = (H - nh) // 2, (W - nw) // 2
+        canvas = np.zeros((H, W), dtype=np.float32)
+        canvas[oy:oy + nh, ox:ox + nw] = img[:nh, :nw]
+        img = canvas
+        pts = {k: (None if v is None else [v[0] * s + ox, v[1] * s + oy])
+               for k, v in pts.items()}
+        sx = sy = s
         if self.augment:
             # ORIENTATION first, then appearance -- see xrsp.geom_aug. A flip is what
             # makes the model indifferent to which way the patient faced; the DRRs are

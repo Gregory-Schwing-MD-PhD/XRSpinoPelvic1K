@@ -171,10 +171,29 @@ class BUULandmarkDataset:
             pts[FEMORAL_KEY] = fem
 
         H, W = self.out_size
-        sy, sx = H / H0, W / W0
-        if (H, W) != (H0, W0):
-            img = zoom(img, (sy, sx), order=1)
-            pts = {k: [v[0] * sx, v[1] * sy] for k, v in pts.items()}
+        # LETTERBOX: one uniform scale for both axes, then pad. NOT independent sy/sx.
+        #
+        # The previous version scaled x and y separately to fill 512x256 exactly, which
+        # distorts every angle in the image. Measured on this dataset: source aspect ratio
+        # has a median of 0.799 against a 0.500 target, so the anisotropy is ~0.625 and a
+        # true 45 deg endplate is rendered at 58 deg -- by a DIFFERENT amount on every
+        # film (anisotropy ranged 0.499 to 1.219 across the test set). Agreement metrics
+        # survived it, because prediction and truth were distorted identically, but every
+        # absolute SS and LL was wrong and the Roussouly thresholds at 35/45 deg were
+        # being applied to angles that had been stretched.
+        #
+        # Padding is added symmetrically so the anatomy stays centred, and the landmarks
+        # are shifted by the same offset. The padded border is 0 (black), which matches
+        # the collimated border already present on these films.
+        s = min(H / H0, W / W0)
+        nh, nw = max(1, int(round(H0 * s))), max(1, int(round(W0 * s)))
+        img = zoom(img, (nh / H0, nw / W0), order=1)
+        oy, ox = (H - nh) // 2, (W - nw) // 2
+        canvas = np.zeros((H, W), dtype=np.float32)
+        canvas[oy:oy + nh, ox:ox + nw] = img[:nh, :nw]
+        img = canvas
+        pts = {k: [v[0] * s + ox, v[1] * s + oy] for k, v in pts.items()}
+        sx = sy = s
         if self.augment:
             # ORIENTATION first, then appearance. Both the film's handedness and any
             # rotation move the LANDMARKS, so they have to be applied where the points
