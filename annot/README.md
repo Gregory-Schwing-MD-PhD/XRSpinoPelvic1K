@@ -22,6 +22,40 @@ with a real radiograph. Without it, PI cannot be validated at all.
 
 These annotations are a **reference set, not training data**. Test split only.
 
+## What you are marking
+
+The hip axis is the line joining the **centres of the two femoral heads**; the point used
+for PI/PT/SS is its midpoint (Legaye & Duval-Beaupère, *Eur Spine J* 1998). The femoral
+head is very nearly a sphere, so its projection is a circle — you are marking **the centre
+of that circle**, a geometric centre rather than a surface point.
+
+**Method.** Trace the *subchondral cortical arc* — the thin dense line of the articular
+surface — and mark its centre of curvature. This is the Mose concentric-circle template
+done by eye, which is why the worked example draws concentric rings. Use the 4× magnifier.
+
+**The trap.** Do not aim at the brightest shadow. Overlap with the acetabulum and the
+opposite head puts the densest region *medial* to the true centre, so "centre of the
+bright blob" is biased rather than merely noisy.
+
+**Never centre on:** the fovea capitis (the medial notch — a defect in the sphere), the
+greater trochanter, the femoral neck or head–neck junction, the acetabular roof or
+teardrop.
+
+**One circle or two.** On a well-positioned lateral the heads superimpose — mark it as
+LEFT and leave RIGHT empty. If rotation separates them, mark both; the midpoint is derived
+and the separation is recorded, because a wide separation means an oblique film and the
+parameters from it are less trustworthy.
+
+**Skip** for a prosthesis, heads outside the collimated field, or an exposure where the
+cortical arc cannot be traced.
+
+![worked example](example_femhead.png)
+
+The example is a **synthetic** radiograph on purpose: there the centre is a 3-D sphere fit
+projected through the imaging geometry, so it is objectively correct rather than one
+annotator's opinion. A marked-up real film would put whoever marked it into every reader's
+head.
+
 ## Rules that make the reference worth having
 
 **No automatic proposal is ever shown.** Not the model's prediction, not the classical

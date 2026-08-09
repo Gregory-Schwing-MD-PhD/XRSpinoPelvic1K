@@ -31,6 +31,44 @@ two heads superimpose, but rotation separates them -- and the bicoxofemoral poin
 DEFINED as the midpoint of the two centres (Legaye & Duval-Beaupere 1998). Collecting
 both lets the midpoint be derived, lets their separation flag an oblique film, and lets a
 reader mark only one when the other is genuinely invisible.
+
+CRITERIA — shown in the app and repeated here so the definition lives with the code.
+
+ANATOMICAL DEFINITION
+  The bicoxofemoral (hip) axis is the line joining the CENTRES of the two femoral heads.
+  The point used for PI, PT and SS is the MIDPOINT of that line (Legaye & Duval-Beaupere,
+  Eur Spine J 1998). It is a geometric centre, not a surface point and not a palpable
+  landmark: the femoral head is very nearly a sphere, so its projection on any radiograph
+  is a circle and the point wanted is the centre of that circle.
+
+HOW TO FIND IT ON A LATERAL FILM
+  1. Identify the femoral head: the round dense structure below and anterior to the S1
+     endplate, seated in the acetabulum.
+  2. Trace the SUBCHONDRAL CORTICAL MARGIN -- the thin dense arc of the articular surface.
+     That arc is the circle to centre on. This is the Mose concentric-circle method done
+     by eye.
+  3. Place the point at the centre of curvature of that arc, NOT at the densest part of
+     the shadow. Overlap with the acetabulum and the opposite head makes the brightest
+     region sit medial to the true centre.
+
+WHAT NOT TO USE
+  * the fovea capitis -- the medial notch where ligamentum teres attaches. It is a defect
+    in the sphere; centring on it pulls the point medially.
+  * the greater trochanter, the femoral neck, or the head-neck junction. None of them is
+    part of the sphere.
+  * the acetabular roof or teardrop. They belong to the pelvis, not the head.
+
+ONE HEAD OR TWO
+  On a well-positioned lateral the two heads superimpose almost exactly and you will see
+  one circle -- mark it as LEFT and leave RIGHT empty. Rotation separates them into two
+  overlapping circles; then mark both, and their midpoint is derived automatically. Their
+  separation is itself recorded, because a wide separation means an oblique film and the
+  spinopelvic parameters from it are less trustworthy.
+
+WHEN TO SKIP
+  Prosthesis, both heads outside the collimated field, or a film so underexposed that the
+  cortical arc cannot be traced. Skipping is a valid answer. A guessed centre becomes a
+  fabricated error in whatever this set is used to measure.
 """
 from __future__ import annotations
 
@@ -128,6 +166,27 @@ def _claimable_slot(case: dict, who: str) -> Optional[str]:
         if not s.get("done") and s.get("expires_at", 0) < _now():
             return k
     return None
+
+
+@app.get("/example")
+def example():
+    """A worked example, served from a bundled PNG.
+
+    Built from a DRR, NOT from a real film, and that is the point: on a DRR the hip point
+    is a 3-D sphere fitted to the femoral head and projected, so the example shows an
+    objectively correct answer rather than one annotator's opinion. Using a marked-up real
+    radiograph would put whoever marked it into every reader's head.
+
+    It is a fixed teaching image and never one of the films being annotated, so it cannot
+    anchor a specific case the way an on-image proposal would.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in ("example_femhead.png", "static/example_femhead.png"):
+        fp = os.path.join(here, name)
+        if os.path.exists(fp):
+            return Response(open(fp, "rb").read(), media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=86400"})
+    raise HTTPException(404, "example image not bundled")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -307,6 +366,49 @@ PAGE = """<!doctype html><meta charset=utf-8>
   <button class=sk onclick=skip()>Can't see <kbd>s</kbd></button>
   <span id=msg></span>
 </header>
+<details id=help open>
+ <summary style="cursor:pointer;padding:8px 12px;background:#22222a">
+   Criteria — read once, then collapse</summary>
+ <div style="display:flex;gap:18px;padding:10px 14px;background:#191920">
+  <div style="max-width:640px;line-height:1.5">
+   <b>What the point is.</b> The hip axis is the line joining the <i>centres</i> of the two
+   femoral heads; the point used for PI/PT/SS is its midpoint
+   (Legaye &amp; Duval-Beaupère 1998). The femoral head is very nearly a sphere, so its
+   projection is a circle — you are marking <b>the centre of that circle</b>.
+   <br><br>
+   <b>How to find it.</b>
+   <ol style="margin:4px 0 0 18px;padding:0">
+    <li>Find the round dense head below and anterior to the S1 endplate, seated in the
+        acetabulum.</li>
+    <li>Trace the <b>subchondral cortical arc</b> — the thin dense line of the articular
+        surface. That arc defines the circle.</li>
+    <li>Mark its <b>centre of curvature</b>, not the brightest spot. Overlap with the
+        acetabulum and the opposite head puts the densest shadow <i>medial</i> to the
+        true centre.</li>
+    <li>Use the magnifier — it follows the cursor at 4×.</li>
+   </ol>
+   <br>
+   <b>Do not centre on:</b> the fovea capitis (medial notch — a defect in the sphere),
+   the greater trochanter, the femoral neck or head–neck junction, the acetabular roof
+   or teardrop.
+   <br><br>
+   <b>One circle or two.</b> On a well-positioned lateral the heads superimpose — mark it
+   as <span style="color:#00E5A0">LEFT</span> and leave
+   <span style="color:#FF3B30">RIGHT</span> empty. If rotation separates them into two
+   overlapping circles, mark both; the midpoint is derived and their separation is
+   recorded, since a wide separation means an oblique film.
+   <br><br>
+   <b>Skip</b> for a prosthesis, heads outside the collimated field, or an exposure where
+   the cortical arc cannot be traced. Skipping is a valid answer — a guessed centre
+   becomes a fabricated error in whatever this set measures.
+  </div>
+  <div><img src="/example" style="max-height:330px;border:1px solid #444;border-radius:6px"
+       alt="worked example" onerror="this.style.display='none'">
+   <div style="font-size:11px;color:#888;max-width:300px;margin-top:4px">
+     Worked example on a synthetic radiograph, where the centre is a 3-D sphere fit rather
+     than anyone's opinion.</div></div>
+ </div>
+</details>
 <div id=wrap><canvas id=c></canvas><canvas id=loupe width=190 height=190></canvas></div>
 <script>
 let img=new Image(), pts=[], cur=null, nextId=null, nextImg=null;
