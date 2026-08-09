@@ -66,7 +66,7 @@ fi
 # for xrsp. _common.sh sets PYTHONPATH=/workspace, so this extends rather than replaces.
 yrun() {
     singularity exec --nv \
-        --env "PYTHONPATH=/workspace/pylibs:/workspace,OMP_NUM_THREADS=${OMP_NUM_THREADS},MPLBACKEND=Agg,YOLO_CONFIG_DIR=/tmp/ultralytics,WANDB_MODE=disabled" \
+        --env "PYTHONPATH=/workspace/pylibs:/workspace,OMP_NUM_THREADS=${OMP_NUM_THREADS},MPLBACKEND=Agg,YOLO_CONFIG_DIR=/tmp/ultralytics,WANDB_MODE=disabled,MLFLOW_ALLOW_FILE_STORE=true,MLFLOW_TRACKING_URI=" \
         --bind "${PROJECT_ROOT}:/workspace,${DATA_ROOT}:/data,${HOST_CONTAINER_TMP}:/tmp" \
         --pwd /workspace "${CONTAINER}" "$@"
 }

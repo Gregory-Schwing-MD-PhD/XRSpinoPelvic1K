@@ -56,7 +56,16 @@ def main(argv=None):
                     help="re-enable Ultralytics defaults -- NOT the paper configuration")
     a = ap.parse_args(argv)
 
-    from ultralytics import YOLO
+    from ultralytics import YOLO, settings
+
+    # Ultralytics AUTO-DETECTS every experiment tracker importable in the environment and
+    # enables it. monai[all] drags in mlflow, whose file-store backend now raises on
+    # import-and-log, so a YOLO run dies inside a logger it was never asked to use. Every
+    # integration is turned off explicitly: this is a controlled baseline and none of them
+    # should be in the loop.
+    settings.update({k: False for k in
+                     ("mlflow", "clearml", "comet", "dvc", "hub", "neptune",
+                      "raytune", "wandb", "tensorboard")})
 
     cfg = dict(PAPER)
     if not a.augment:
