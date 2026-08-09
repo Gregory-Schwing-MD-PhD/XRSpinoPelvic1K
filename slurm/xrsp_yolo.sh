@@ -2,10 +2,10 @@
 #SBATCH --job-name=xrsp_yolo
 #SBATCH -q gpu
 #SBATCH --gres=gpu:nvidia_h200:1
-# msa1's H200 reports "[GPU requires reset]": nvidia-smi enumerates it, cuInit
+# msa1 AND msa4 have unusable H200s. msa1 reports "[GPU requires reset]": nvidia-smi enumerates it, cuInit
 # returns NO_DEVICE, and torch silently falls back to CPU (25x slower, no error).
 # Needs a root-level reset. REMOVE THIS LINE once the node is fixed.
-#SBATCH --exclude=msa1
+#SBATCH --exclude=msa1,msa4
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
