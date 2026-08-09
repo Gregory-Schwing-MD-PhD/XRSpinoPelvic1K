@@ -165,6 +165,57 @@ nothing on BUU.
 
 ---
 
+## 4b. Whole-spine standing films: a scale cliff, and the fix
+
+The detector is trained on coned lateral lumbar films, where L1–S1 fills the frame. On a
+standing C2–S1 radiograph the same six vertebrae occupy roughly a third of it. Nothing
+else changes — same anatomy, same projection, same weights — so the question is purely
+one of **scale at the network input**, and it can be measured on films that already have
+ground truth.
+
+Each of 40 test films was pasted into a taller canvas so the lumbar spine occupies a
+fraction **f** of the height (`scripts/standing_scale_sweep.py`). f = 1.00 is the coned
+film as acquired; **f ≈ 0.36** is where L1–S1 sits on a C2–S1 standing view. Every error
+is mapped back to original film pixels, so the columns are comparable across f.
+
+| f | 1.00 | 0.80 | 0.65 | 0.50 | 0.42 | **0.36** | 0.30 | 0.25 | 0.20 |
+|---|---|---|---|---|---|---|---|---|---|
+| **single pass** — vertebrae found /6 | **6.00** | 5.72 | 2.90 | 0.05 | 0.03 | **0.00** | 0.05 | 0.03 | 0.12 |
+| **tiled** — vertebrae found /6 | 5.40 | 5.42 | 5.58 | 5.45 | 5.65 | **5.45** | 5.42 | 5.53 | 5.45 |
+| tiled — median corner error, % diag | 0.284 | 0.284 | 0.323 | 0.332 | 0.330 | 0.305 | 0.292 | 0.324 | 0.302 |
+| tiled — SS MAE ° | 3.66 | 4.25 | 3.96 | 4.74 | 3.76 | **4.79** | 5.95 | 4.98 | 5.54 |
+
+**A single pass does not degrade on a standing film — it stops working.** Detections go
+from 6.0/6 to **zero** between f = 0.65 and f = 0.42. This is not a gradual accuracy loss
+that could be tolerated; below about two-thirds framing the model returns nothing at all,
+and the handful of "detections" at f ≤ 0.30 are spurious (median error 14–46 % of the
+diagonal — the width of the image).
+
+**Tiling is flat.** Overlapping square windows the width of the film, stepped down it at
+50 % overlap with one global NMS, hold 5.4–5.7 of 6 at **every** framing tested down to
+f = 0.20, with median corner error steady at 0.28–0.33 % of the diagonal. No retraining,
+no new labels, no standing-film dataset — the model was never scale-invariant, the
+*protocol* was.
+
+The cost is at the other end: at f = 1.00 tiling finds 5.40/6 against the single pass's
+6.00, because a tile edge can cut a vertebra the whole-film pass sees intact, and SS MAE
+rises 2.79° → 3.66°. So neither is right everywhere, and the deployed policy is to take
+the cheap pass and fall back to tiles only when it comes up short.
+
+Two caveats that make this an **upper bound** on standing-film performance:
+
+* the padding is uniform grey. A real standing film's margins contain thoracic vertebrae
+  — distractors that look exactly like the objects being counted, and that the level
+  chain then has to name correctly.
+* the lumbar spine is at native detail, only re-framed. A standing film is usually
+  acquired at lower magnification, so the lumbar segment carries fewer real pixels too.
+
+Verified end to end in the browser (`pacs/tools/test_page.py`): at f = 0.36 a single pass
+reports *no detections*, and auto-fallback tiles the film into 8 windows and recovers 7
+vertebrae with SS within **1.9°** of the same film's coned reading.
+
+---
+
 ## 5. Methodological findings that changed the numbers
 
 **Anisotropic resize was distorting every angle.** Both loaders filled 512 × 256 by
