@@ -52,9 +52,21 @@ RUN pip install --no-cache-dir "wandb>=0.12.10"
 
 # ── YOLO-Pose baseline (Ultralytics) ─────────────────────────────────────────
 # Pinned to the version in Bansal et al. 2026 Table 3, so the baseline is the software
-# they actually ran rather than whatever is current. Pure python on top of the torch
-# already installed above, so this layer is seconds and leaves everything expensive cached.
-RUN pip install --no-cache-dir "ultralytics==8.3.159"
+# they actually ran rather than whatever is current.
+#
+# INSTALLED UNDER CONSTRAINTS, and that is not optional. `pip install ultralytics` with a
+# free hand resolves to torch 2.13 and numpy 2.4 -- measured, not feared: it dragged in
+# 8.4 GB and left monai (numpy<2) and torchaudio (torch==2.4.1) broken, which would have
+# silently disabled the heatmap model in the same image that is supposed to compare
+# against it. The constraints pin the stack that is already here, so pip must either fit
+# around it or fail loudly at BUILD time rather than at 3am in a grid job.
+RUN printf 'torch==2.4.1\ntorchvision==0.19.1\nnumpy==1.26.4\n' > /tmp/constraints.txt \
+    && pip install --no-cache-dir -c /tmp/constraints.txt "ultralytics==8.3.159" \
+    && rm /tmp/constraints.txt \
+    && python3 -c "import torch, numpy, monai, ultralytics; \
+assert torch.__version__.startswith('2.4.1'), torch.__version__; \
+assert numpy.__version__.startswith('1.26'), numpy.__version__; \
+print('stack intact:', torch.__version__, numpy.__version__, ultralytics.__version__)"
 
 # ── OpenSpineToolkit — the 3-D endplate fit the labels come from ─────────────
 # Endplate corners are fitted in 3-D (medial band + outlier rejection, which drops
