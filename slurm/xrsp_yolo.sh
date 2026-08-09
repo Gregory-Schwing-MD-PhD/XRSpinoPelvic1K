@@ -48,6 +48,8 @@ MODEL="${MODEL:-yolo11n-pose.pt}"
 DATA="${DATA:-/data/buu_yolo/buu.yaml}"
 OUT="${OUT:-/data/runs/yolo}"
 EPOCHS="${EPOCHS:-100}"
+IMGSZ="${IMGSZ:-640}"
+TAG="${TAG:-}"
 
 _data_host="${DATA_ROOT}${DATA#/data}"
 if [[ ! -f "${_data_host}" ]]; then
@@ -84,6 +86,6 @@ if not torch.cuda.is_available():
 print('device:', torch.cuda.get_device_name(0))"
 
 yrun python3 scripts/train_yolo_pose.py \
-    --data "${DATA}" --model "${MODEL}" --out "${OUT}" --epochs "${EPOCHS}"
+    --data "${DATA}" --model "${MODEL}" --out "${OUT}" --epochs "${EPOCHS}"     --imgsz "${IMGSZ}" ${TAG:+--tag "${TAG}"}
 
 echo "[yolo] done $(date)"

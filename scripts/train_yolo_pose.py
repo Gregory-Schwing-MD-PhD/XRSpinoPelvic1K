@@ -52,6 +52,12 @@ def main(argv=None):
                          "or yolov8l-pose.pt (their highest accuracy)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--epochs", type=int, default=None, help="override Table 4's 100")
+    ap.add_argument("--imgsz", type=int, default=None,
+                    help="override Table 4's 640. Higher resolution is the most direct "
+                         "lever on landmark precision: a corner cannot be localised "
+                         "better than the pixel grid it is predicted on.")
+    ap.add_argument("--lr0", type=float, default=None)
+    ap.add_argument("--tag", default=None, help="run name; defaults to the model stem")
     ap.add_argument("--augment", action="store_true",
                     help="re-enable Ultralytics defaults -- NOT the paper configuration")
     a = ap.parse_args(argv)
@@ -72,8 +78,13 @@ def main(argv=None):
         cfg.update(NO_AUG)
     if a.epochs is not None:
         cfg["epochs"] = a.epochs
+    if a.imgsz is not None:
+        cfg["imgsz"] = a.imgsz
+    if a.lr0 is not None:
+        cfg["lr0"] = a.lr0
     cfg.update(data=os.path.abspath(a.data), project=os.path.abspath(a.out),
-               name=os.path.splitext(os.path.basename(a.model))[0], exist_ok=True)
+               name=a.tag or os.path.splitext(os.path.basename(a.model))[0],
+               exist_ok=True)
 
     os.makedirs(a.out, exist_ok=True)
     # Written BEFORE training: if the run dies, the configuration it died under is still
