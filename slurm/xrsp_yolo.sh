@@ -1,15 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=xrsp_yolo
 #SBATCH -q gpu
-#SBATCH --gres=gpu:nvidia_h200:1
-# msa1 AND msa4 have unusable H200s. msa1 reports "[GPU requires reset]": nvidia-smi enumerates it, cuInit
-# returns NO_DEVICE, and torch silently falls back to CPU (25x slower, no error).
-# Needs a root-level reset. REMOVE THIS LINE once the node is fixed.
+# ANY GPU, not specifically an H200. YOLOv11n-Pose at batch 8 / 640 px needs about 4 GB
+# -- Bansal et al. trained it on an RTX 4060 LAPTOP GPU with 8 GB (their Table 3), so a
+# V100 is already more capable than the paper's hardware and an H200 is pure queue tax.
+# All four H200s are currently unusable anyway: msa1 and msa4 report GPUs that enumerate
+# but fail cuInit, msa2 and msa3 are drained. The CUDA guard below is what makes this
+# safe -- it refuses to run on a card torch cannot see, whichever node we land on.
+#SBATCH --gres=gpu:1
 #SBATCH --exclude=msa1,msa4
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
-#SBATCH --mem=120G
+#SBATCH --mem=48G
 #SBATCH --time=06:00:00
 #SBATCH --output=logs/xrsp_yolo_%j.out
 #SBATCH --error=logs/xrsp_yolo_%j.err
