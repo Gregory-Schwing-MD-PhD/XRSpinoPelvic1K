@@ -216,6 +216,53 @@ vertebrae with SS within **1.9°** of the same film's coned reading.
 
 ---
 
+## 4c. The landmarks do not extrapolate to unlabelled vertebrae
+
+If the detector had learned the generic concept *vertebral body*, whole-spine landmarks
+would come free: the class is single ("vertebra"), and most BUU laterals include T12,
+T11 and often more, entirely unannotated. Every test film is therefore already a
+held-out trial of the question — and it fails.
+
+Across 40 test films (`scripts/extrapolate_above_l1.py`), counting detections that
+overlap no annotated vertebra (IoU < 0.2) and sit cranial to L1:
+
+| | detections / film | extra, above L1 | films with any |
+|---|---|---|---|
+| single pass | 6.10 | **0.10** | **10 %** |
+| tiled | 4.72 | 0.07 | 8 % |
+
+Ground truth is six objects per film. The model returns **6.10** — it finds the six it
+is scored on and, on nine films in ten, nothing else, even where four or five thoracic
+vertebrae are clearly visible in the same exposure.
+
+Where an extra detection does occur it is **T12 and only T12** — the level immediately
+above L1, at up to 0.967 confidence — with T11, T10 and T9 visible and ignored in the
+same film. Extrapolation reaches about one level and stops.
+
+**The cause is in the labels, not the architecture.** BUU annotates L1–S1 only, so on
+all 1398 training films every thoracic vertebra was a positive example of *background*.
+The model was not merely left uninformed about them; it was trained to suppress them.
+That the one adjacent level survives is consistent with box-boundary slack rather than
+with any generic notion of "vertebra".
+
+Consequences for whole-spine landmarking:
+
+* **A standing-film protocol built on tiling still only yields L1–S1.** §4b shows tiling
+  restores detection at standing framing; it does not create thoracic landmarks, because
+  there is nothing to restore.
+* **The no-human-labelling route that remains is DRR pseudo-labels.** The 3-D
+  segmentations already label thoracic vertebrae, and `endplate_corners()` (written for
+  the demo's reference pane) projects a corner for any level with a label — whole-spine
+  corners at zero annotation cost. The blocker is the synthetic-to-real gap, which is
+  measured and unsolved here: mixing DRRs into training made real-film accuracy **worse**
+  on every column, and a class supervised only on DRRs scored 40/40 on DRRs and 0/40 on
+  film.
+* **Simply cropping training films to the annotated block would remove the suppression
+  signal, not supply a positive one.** It is worth testing as an ablation, but it cannot
+  by itself teach a level the model has never been shown as an object.
+
+---
+
 ## 5. Methodological findings that changed the numbers
 
 **Anisotropic resize was distorting every angle.** Both loaders filled 512 × 256 by
