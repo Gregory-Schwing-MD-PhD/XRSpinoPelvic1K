@@ -152,17 +152,62 @@ def next_case(u: dict = Depends(user)):
     return JSONResponse({"detail": "nothing left to annotate"}, status_code=404)
 
 
-@app.get("/image/{case_id}")
-def image(case_id: str, u: dict = Depends(user)):
-    """Stream the film THROUGH the Space so annotators never need read access to the
-    image repo, exactly as the review service streams labels."""
+# Display width. A BUU film is ~2000x2400 and several MB; sending that raw makes every
+# "next film" a multi-second wait, which is the difference between annotating 120 films in
+# an afternoon and giving up. At 1100 px one displayed pixel is under 2 source pixels,
+# and the consensus tolerance is 0.005 of width (~10 source px), so the downscale costs
+# nothing that matters. Coordinates are normalised anyway, so precision is set by the
+# MAGNIFIER, not by the transport size.
+DISPLAY_W = int(os.environ.get("DISPLAY_W", 1100))
+_IMG_CACHE: dict = {}
+
+
+def _render_jpeg(case_id: str) -> bytes:
+    if case_id in _IMG_CACHE:
+        return _IMG_CACHE[case_id]
+    from io import BytesIO
+
     from huggingface_hub import hf_hub_download
+    from PIL import Image
     try:
         p = hf_hub_download(IMAGE_REPO, f"images/{case_id}.jpg", repo_type="dataset",
                             token=os.environ.get("HF_TOKEN"))
     except Exception as exc:                                 # noqa: BLE001
         raise HTTPException(404, f"image not found: {exc}")
-    return Response(open(p, "rb").read(), media_type="image/jpeg")
+    im = Image.open(p).convert("L")
+    if im.width > DISPLAY_W:
+        im = im.resize((DISPLAY_W, round(im.height * DISPLAY_W / im.width)),
+                       Image.LANCZOS)
+    buf = BytesIO()
+    im.save(buf, format="JPEG", quality=88, optimize=True)
+    data = buf.getvalue()
+    if len(_IMG_CACHE) < 400:              # bounded: a Space has finite memory
+        _IMG_CACHE[case_id] = data
+    return data
+
+
+@app.get("/image/{case_id}")
+def image(case_id: str, u: dict = Depends(user)):
+    """Stream the film THROUGH the Space so annotators never need read access to the
+    image repo, exactly as the review service streams labels."""
+    return Response(_render_jpeg(case_id), media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.get("/peek")
+def peek(u: dict = Depends(user)):
+    """The next case id WITHOUT claiming it, so the browser can prefetch its image.
+
+    Claiming on prefetch would hand every annotator a second case the moment they opened
+    one, and abandoned claims would pile up behind the TTL.
+    """
+    st = _store()
+    for case in st.list_cases():
+        if case.get("final"):
+            continue
+        if _claimable_slot(case, u["id"]) is not None:
+            return {"case_id": case["case_id"]}
+    return JSONResponse({"detail": "none"}, status_code=404)
 
 
 @app.post("/submit")
@@ -239,50 +284,90 @@ PAGE = """<!doctype html><meta charset=utf-8>
 <title>Femoral head annotation</title>
 <style>
  body{font:14px system-ui;margin:0;background:#111;color:#eee}
- header{padding:8px 12px;background:#1b1b1f;display:flex;gap:12px;align-items:center}
+ header{padding:8px 12px;background:#1b1b1f;display:flex;gap:10px;align-items:center;
+        flex-wrap:wrap}
  #wrap{position:relative;display:inline-block}
- canvas{cursor:crosshair;max-height:88vh}
+ canvas{cursor:none;max-height:86vh}
+ #loupe{position:absolute;width:190px;height:190px;border:2px solid #0072B2;
+        border-radius:50%;pointer-events:none;display:none;box-shadow:0 0 12px #000;
+        background:#000;z-index:5}
  button{padding:6px 12px;border-radius:6px;border:0;cursor:pointer}
  .go{background:#0072B2;color:#fff}.sk{background:#666;color:#fff}
  #msg{margin-left:auto;color:#9ad}
  input{background:#222;color:#eee;border:1px solid #444;border-radius:5px;padding:5px}
+ kbd{background:#333;padding:1px 5px;border-radius:3px;font-size:11px}
 </style>
 <header>
-  <input id=tok type=password placeholder="hf_... token" size=26>
-  <button class=go onclick=load()>Next film</button>
-  <span>click <b style="color:#00E5A0">LEFT</b> head, then
+  <input id=tok type=password placeholder="hf_... token" size=24>
+  <button class=go onclick=load()>Next</button>
+  <span>click <b style="color:#00E5A0">LEFT</b> head then
         <b style="color:#FF3B30">RIGHT</b></span>
-  <button onclick=undo()>Undo</button>
-  <button class=go onclick=send()>Submit</button>
-  <button class=sk onclick=skip()>Can't see them</button>
+  <button onclick=undo()>Undo <kbd>u</kbd></button>
+  <button class=go onclick=send()>Submit <kbd>enter</kbd></button>
+  <button class=sk onclick=skip()>Can't see <kbd>s</kbd></button>
   <span id=msg></span>
 </header>
-<div id=wrap><canvas id=c></canvas></div>
+<div id=wrap><canvas id=c></canvas><canvas id=loupe width=190 height=190></canvas></div>
 <script>
-let img=new Image(), pts=[], cur=null, C=document.getElementById('c'), X=C.getContext('2d');
+let img=new Image(), pts=[], cur=null, nextId=null, nextImg=null;
+const C=document.getElementById('c'), X=C.getContext('2d');
+const LP=document.getElementById('loupe'), LX=LP.getContext('2d');
 const H=()=>({Authorization:'Bearer '+document.getElementById('tok').value});
-function msg(t){document.getElementById('msg').textContent=t}
+const msg=t=>document.getElementById('msg').textContent=t;
+
+// PREFETCH: fetch the next film's bytes while this one is being annotated, so "Next"
+// is instant instead of a round trip to HuggingFace. /peek does not claim the case --
+// claiming on prefetch would hand everyone a second case they never opened.
+async function prefetch(){
+  try{
+    const r=await fetch('/peek',{headers:H()}); if(!r.ok)return;
+    const j=await r.json(); if(!j.case_id||j.case_id===nextId)return;
+    nextId=j.case_id;
+    const b=await fetch('/image/'+nextId,{headers:H()});
+    nextImg=URL.createObjectURL(await b.blob());
+  }catch(e){}
+}
 async function load(){
-  pts=[];const r=await fetch('/next',{headers:H()});
-  if(!r.ok){msg(await r.text());return}
+  pts=[]; const t0=performance.now();
+  const r=await fetch('/next',{headers:H()});
+  if(!r.ok){msg('nothing left to annotate');return}
   cur=await r.json();
+  const src=(cur.case_id===nextId&&nextImg)?nextImg:null;
   img=new Image();
-  img.onload=()=>{C.width=img.width;C.height=img.height;draw()};
-  const b=await fetch(cur.image_url,{headers:H()});
-  img.src=URL.createObjectURL(await b.blob());
-  msg(cur.case_id+'  slot '+cur.slot);
+  img.onload=()=>{C.width=img.width;C.height=img.height;draw();
+                  msg(cur.case_id+'  slot '+cur.slot+'  ('+Math.round(performance.now()-t0)+' ms)');
+                  nextId=null;nextImg=null;prefetch();};
+  if(src){img.src=src}
+  else{const b=await fetch(cur.image_url,{headers:H()});
+       img.src=URL.createObjectURL(await b.blob());}
 }
 function draw(){
   X.drawImage(img,0,0);
   pts.forEach((p,i)=>{
-    X.strokeStyle=i===0?'#00E5A0':'#FF3B30';X.lineWidth=Math.max(2,img.width/500);
-    X.beginPath();X.arc(p[0]*img.width,p[1]*img.height,img.width/70,0,7);X.stroke();
-    X.beginPath();X.moveTo(p[0]*img.width-img.width/40,p[1]*img.height);
-    X.lineTo(p[0]*img.width+img.width/40,p[1]*img.height);
-    X.moveTo(p[0]*img.width,p[1]*img.height-img.width/40);
-    X.lineTo(p[0]*img.width,p[1]*img.height+img.width/40);X.stroke();
+    X.strokeStyle=i===0?'#00E5A0':'#FF3B30';X.lineWidth=Math.max(1.5,img.width/700);
+    const x=p[0]*img.width,y=p[1]*img.height,r=img.width/80;
+    X.beginPath();X.arc(x,y,r,0,7);X.stroke();
+    X.beginPath();X.moveTo(x-r*1.7,y);X.lineTo(x+r*1.7,y);
+    X.moveTo(x,y-r*1.7);X.lineTo(x,y+r*1.7);X.stroke();
   });
 }
+// MAGNIFIER: a femoral head centre is judged by the curvature of a faint arc, and the
+// film is displayed scaled down to fit the screen. Without this the annotator's precision
+// is set by the display scale rather than by the anatomy.
+C.addEventListener('mousemove',e=>{
+  const r=C.getBoundingClientRect();
+  const fx=(e.clientX-r.left)/r.width, fy=(e.clientY-r.top)/r.height;
+  const sx=fx*img.width, sy=fy*img.height, Z=4, S=190/Z;
+  LX.fillStyle='#000';LX.fillRect(0,0,190,190);
+  LX.drawImage(img, sx-S/2, sy-S/2, S, S, 0,0,190,190);
+  LX.strokeStyle='#0072B2';LX.lineWidth=1;
+  LX.beginPath();LX.moveTo(95,80);LX.lineTo(95,110);LX.moveTo(80,95);LX.lineTo(110,95);
+  LX.stroke();
+  LP.style.display='block';
+  LP.style.left=(e.clientX-r.left+18)+'px';
+  LP.style.top=(e.clientY-r.top-210)+'px';
+});
+C.addEventListener('mouseleave',()=>LP.style.display='none');
 C.addEventListener('click',e=>{
   if(pts.length>=2)return;
   const r=C.getBoundingClientRect();
@@ -291,18 +376,22 @@ C.addEventListener('click',e=>{
 function undo(){pts.pop();draw()}
 async function send(){
   if(!cur||!pts.length){msg('mark at least one head');return}
-  const body=new FormData();
-  body.append('case_id',cur.case_id);body.append('slot',cur.slot);
-  body.append('points',JSON.stringify({left:pts[0]||null,right:pts[1]||null,
-                                       w:img.width,h:img.height}));
-  const r=await fetch('/submit',{method:'POST',headers:H(),body});
-  msg(r.ok?'saved — loading next':'error');if(r.ok)load();
+  const b=new FormData();
+  b.append('case_id',cur.case_id);b.append('slot',cur.slot);
+  b.append('points',JSON.stringify({left:pts[0]||null,right:pts[1]||null,
+                                    w:img.width,h:img.height}));
+  const r=await fetch('/submit',{method:'POST',headers:H(),body:b});
+  if(r.ok){load()}else{msg('error saving')}
 }
 async function skip(){
-  const body=new FormData();
-  body.append('case_id',cur.case_id);body.append('slot',cur.slot);
-  body.append('reason',prompt('why?')||'');
-  await fetch('/skip',{method:'POST',headers:H(),body});load();
+  const b=new FormData();
+  b.append('case_id',cur.case_id);b.append('slot',cur.slot);
+  b.append('reason',prompt('why is it unreadable?')||'');
+  await fetch('/skip',{method:'POST',headers:H(),body:b});load();
 }
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='u')undo(); else if(e.key==='Enter')send(); else if(e.key==='s')skip();
+});
 </script>
 """
