@@ -43,16 +43,29 @@ def main() -> int:
     from huggingface_hub import HfApi
     api = HfApi(token=token)
 
+    # Check FIRST, create only if absent. create_repo(exist_ok=True) still goes through
+    # the create endpoint, and that endpoint is what enforces the PRO requirement -- so
+    # on a free account it 402s even for a Space that already exists and runs fine.
     try:
-        api.create_repo(a.space, repo_type="space", space_sdk="docker",
-                        private=a.private, exist_ok=True)
-    except Exception as exc:                                   # noqa: BLE001
-        if "402" in str(exc):
-            print("\n  HuggingFace refused to create the Space: Docker Spaces on free\n"
-                  "  cpu-basic now need a PRO subscription (https://huggingface.co/pro).\n"
-                  "  Existing Spaces are unaffected; pass --space owner/existing-name to\n"
-                  "  redeploy into one you already have.\n", file=sys.stderr)
-        raise
+        api.space_info(a.space)
+        exists = True
+    except Exception:                                          # noqa: BLE001
+        exists = False
+
+    if exists:
+        print(f"  {a.space} exists — redeploying into it")
+    else:
+        try:
+            api.create_repo(a.space, repo_type="space", space_sdk="docker",
+                            private=a.private, exist_ok=True)
+        except Exception as exc:                               # noqa: BLE001
+            if "402" in str(exc):
+                print("\n  HuggingFace refused to CREATE the Space: Docker Spaces on\n"
+                      "  free cpu-basic now need PRO (https://huggingface.co/pro).\n"
+                      "  Spaces that already exist keep working — pass\n"
+                      "  --space owner/existing-name to redeploy into one of those.\n",
+                      file=sys.stderr)
+            raise
 
     api.upload_folder(
         folder_path=str(HERE), repo_id=a.space, repo_type="space",
