@@ -32,7 +32,7 @@ DEFINED as the midpoint of the two centres (Legaye & Duval-Beaupere 1998). Colle
 both lets the midpoint be derived, lets their separation flag an oblique film, and lets a
 reader mark only one when the other is genuinely invisible.
 
-CRITERIA � shown in the app and repeated here so the definition lives with the code.
+CRITERIA � shown in the app and repeated here so the definition lives with the code.
 
 ANATOMICAL DEFINITION
   The bicoxofemoral (hip) axis is the line joining the CENTRES of the two femoral heads.
@@ -78,7 +78,7 @@ import os
 import time
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Form, Header, HTTPException
+from fastapi import Cookie, Depends, FastAPI, Form, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 import store as store_mod  # noqa: E402  (sibling, as in review_service)
@@ -112,11 +112,107 @@ app = FastAPI(title="Femoral head annotation")
 _WHOAMI: dict = {}
 
 
+# "local:/path" runs the whole Space off the filesystem: real ledger, real images, real
+# HTTP, no HuggingFace. That is what the test suite drives, and it is the only way to
+# exercise sign-in, claiming and the not-visible path without minting tokens and writing
+# to a live repo. On the Space ANNOT_REPO is an org/name repo id, so DEV_LOCAL is False.
+DEV_LOCAL = ANNOT_REPO.startswith("local:")
+
+
 def _store():
+    if DEV_LOCAL:
+        return store_mod.ReviewStore(store_mod.LocalBackend(ANNOT_REPO[6:]))
     if not ANNOT_REPO or not os.environ.get("HF_TOKEN"):
         raise HTTPException(500, "ANNOT_REPO and HF_TOKEN must be set")
     return store_mod.ReviewStore(
         store_mod.HFBackend(ANNOT_REPO, os.environ["HF_TOKEN"]))
+
+
+# ── in-memory ledger ────────────────────────────────────────────────────────────
+# store.list_cases() reads EVERY case json out of the dataset repo. At 2000 cases that
+# is 2000 file reads to answer one "give me the next film", on both /next and /peek --
+# tens of seconds per click, which is not a slow tool, it is an unusable one.
+#
+# So the ledger is loaded once and held in memory, and writes go through a batched
+# background flush. Two consequences worth being explicit about:
+#
+#   * a submit returns as soon as memory is updated, so the annotator never waits on a
+#     git commit to see the next film. Durability lags by at most FLUSH_SECONDS.
+#   * dirty cases are batched into ONE commit. Per-case commits would mean ~4000 commits
+#     for a double-read pass over 2000 films, which is slow and abuses the repo.
+#
+# A Space runs a single replica, so memory is authoritative while it is up; on restart
+# the index is rebuilt from the repo. Nothing is stored only in RAM for longer than the
+# flush interval.
+import threading  # noqa: E402
+
+FLUSH_SECONDS = float(os.environ.get("FLUSH_SECONDS", 3.0))
+_LOCK = threading.RLock()
+_INDEX: dict = {}
+_ORDER: list = []
+_DIRTY: set = set()
+_READY = threading.Event()
+_LOAD_ERR: list = []
+
+
+def _load_index() -> None:
+    """One pass over the repo at startup. Slow by nature; it happens once."""
+    try:
+        cases = _store().list_cases()
+    except Exception as exc:                                   # noqa: BLE001
+        _LOAD_ERR.append(str(exc))
+        _READY.set()
+        return
+    with _LOCK:
+        _INDEX.clear()
+        for c in cases:
+            _INDEX[c["case_id"]] = c
+        _ORDER[:] = sorted(_INDEX)
+    _READY.set()
+
+
+def _flush_once() -> int:
+    with _LOCK:
+        ids = list(_DIRTY)
+        _DIRTY.clear()
+        batch = [_INDEX[i] for i in ids if i in _INDEX]
+    if not batch:
+        return 0
+    try:
+        _store().put_cases(batch)
+    except Exception:                                          # noqa: BLE001
+        with _LOCK:                       # put them back; try again next tick
+            _DIRTY.update(ids)
+        return 0
+    return len(batch)
+
+
+def _flusher() -> None:
+    while True:
+        time.sleep(FLUSH_SECONDS)
+        try:
+            _flush_once()
+        except Exception:                                      # noqa: BLE001
+            pass
+
+
+@app.on_event("startup")
+def _boot() -> None:
+    threading.Thread(target=_load_index, daemon=True).start()
+    threading.Thread(target=_flusher, daemon=True).start()
+
+
+def _wait_ready() -> None:
+    if not _READY.wait(timeout=120):
+        raise HTTPException(503, "ledger still loading, try again in a moment")
+    if _LOAD_ERR:
+        raise HTTPException(500, f"ledger failed to load: {_LOAD_ERR[0]}")
+
+
+def _touch(case: dict) -> None:
+    with _LOCK:
+        _INDEX[case["case_id"]] = case
+        _DIRTY.add(case["case_id"])
 
 
 def _hf_username(token: str) -> Optional[str]:
@@ -137,12 +233,124 @@ def _hf_username(token: str) -> Optional[str]:
     return name
 
 
-def user(authorization: str = Header(default="")) -> dict:
-    tok = authorization[7:] if authorization.lower().startswith("bearer ") else ""
-    name = _hf_username(tok)
+# ── sign in with HuggingFace ────────────────────────────────────────────────────
+# Set `hf_oauth: true` in the Space README and HF injects OAUTH_CLIENT_ID/SECRET. Then
+# signing in is one button, which matters: the readers are radiologists and medical
+# students, and "create a token, choose the right scopes, paste the string" is a step
+# where a good fraction of them simply stop.
+#
+# The user's access token is used ONCE, to read their username, and is then discarded --
+# nothing here needs to act on their behalf. The session cookie carries the verified
+# username and an expiry, signed with the client secret. Pasting a token still works, so
+# the tool runs locally and in tests with no OAuth app at all.
+OAUTH_ID = os.environ.get("OAUTH_CLIENT_ID", "")
+OAUTH_SECRET = os.environ.get("OAUTH_CLIENT_SECRET", "")
+SPACE_HOST = os.environ.get("SPACE_HOST", "")
+OAUTH_ENABLED = bool(OAUTH_ID and OAUTH_SECRET)
+SESSION_DAYS = 30
+_SECRET = (OAUTH_SECRET or os.environ.get("HF_TOKEN", "") or "dev").encode()
+
+
+def _sign(payload: str) -> str:
+    import hmac
+    mac = hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{payload}.{mac}"
+
+
+def _unsign(cookie: str) -> Optional[str]:
+    import hmac
+    if not cookie or "." not in cookie:
+        return None
+    payload, _, mac = cookie.rpartition(".")
+    good = hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(mac, good):
+        return None
+    name, _, exp = payload.partition("|")
+    try:
+        if float(exp) < time.time():
+            return None
+    except ValueError:
+        return None
+    return name or None
+
+
+def _redirect_uri() -> str:
+    host = SPACE_HOST or "localhost:7860"
+    scheme = "https" if SPACE_HOST else "http"
+    return f"{scheme}://{host}/auth/callback"
+
+
+@app.get("/auth/login")
+def auth_login():
+    from fastapi.responses import RedirectResponse
+    if not OAUTH_ENABLED:
+        raise HTTPException(503, "OAuth is not configured on this Space; paste a token")
+    state = _sign(f"s|{time.time() + 600}")
+    url = ("https://huggingface.co/oauth/authorize"
+           f"?client_id={OAUTH_ID}&redirect_uri={_redirect_uri()}"
+           f"&response_type=code&scope=openid%20profile&state={state}&prompt=consent")
+    r = RedirectResponse(url, status_code=302)
+    r.set_cookie("oauth_state", state, max_age=600, httponly=True, samesite="lax",
+                 secure=bool(SPACE_HOST))
+    return r
+
+
+@app.get("/auth/callback")
+def auth_callback(code: str = "", state: str = "", error: str = ""):
+    from fastapi.responses import RedirectResponse
+    import requests
+    if error:
+        raise HTTPException(400, f"HuggingFace returned: {error}")
+    if not code or not _unsign(state):
+        raise HTTPException(400, "bad or expired sign-in state — start again from /")
+    tok = requests.post(
+        "https://huggingface.co/oauth/token",
+        data={"client_id": OAUTH_ID, "client_secret": OAUTH_SECRET,
+              "grant_type": "authorization_code", "code": code,
+              "redirect_uri": _redirect_uri()}, timeout=20)
+    if not tok.ok:
+        raise HTTPException(400, f"token exchange failed: {tok.text[:200]}")
+    access = tok.json().get("access_token", "")
+    info = requests.get("https://huggingface.co/oauth/userinfo",
+                        headers={"Authorization": f"Bearer {access}"}, timeout=20)
+    name = (info.json() or {}).get("preferred_username") if info.ok else None
     if not name:
-        raise HTTPException(401, "send your HuggingFace token as: Authorization: Bearer hf_...")
+        raise HTTPException(400, "could not read your HuggingFace username")
+    r = RedirectResponse("/", status_code=302)
+    r.set_cookie("annot_session",
+                 _sign(f"{name}|{time.time() + SESSION_DAYS * 86400}"),
+                 max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax",
+                 secure=bool(SPACE_HOST))
+    r.delete_cookie("oauth_state")
+    return r
+
+
+@app.get("/auth/logout")
+def auth_logout():
+    from fastapi.responses import RedirectResponse
+    r = RedirectResponse("/", status_code=302)
+    r.delete_cookie("annot_session")
+    return r
+
+
+def user(authorization: str = Header(default=""),
+         annot_session: str = Cookie(default="")) -> dict:
+    name = _unsign(annot_session)
+    if not name and DEV_LOCAL:
+        # dev only: whoami would need a real token and a network round trip
+        name = (authorization[7:] if authorization.lower().startswith("bearer ")
+                else "") or None
+    if not name:
+        tok = authorization[7:] if authorization.lower().startswith("bearer ") else ""
+        name = _hf_username(tok)
+    if not name:
+        raise HTTPException(401, "sign in with HuggingFace")
     return {"id": name, "role": "adjudicator" if name.lower() in ADJUDICATORS else "primary"}
+
+
+@app.get("/whoami")
+def whoami_route(annot_session: str = Cookie(default="")):
+    return {"user": _unsign(annot_session), "oauth": OAUTH_ENABLED}
 
 
 def _now() -> float:
@@ -189,6 +397,22 @@ def example():
     raise HTTPException(404, "example image not bundled")
 
 
+@app.get("/reference")
+def reference():
+    """The 'where is it / what am I marking' figure, built by make_reference.py.
+
+    Same reasoning as /example: it is drawn on a DRR, so the crosshair is ostk's own
+    sphere fit projected, not a person's opinion, and it is a fixed teaching image rather
+    than any film in the queue.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    fp = os.path.join(here, "reference_femhead.png")
+    if os.path.exists(fp):
+        return Response(open(fp, "rb").read(), media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    raise HTTPException(404, "reference image not bundled")
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return PAGE
@@ -196,18 +420,21 @@ def index():
 
 @app.get("/next")
 def next_case(u: dict = Depends(user)):
-    st = _store()
-    for case in st.list_cases():
-        if case.get("final"):
-            continue
-        slot = _claimable_slot(case, u["id"])
-        if slot is None:
-            continue
-        case["slots"][slot] = {"annotator": u["id"], "claimed_at": _now(),
-                               "expires_at": _now() + CLAIM_TTL, "done": False}
-        st.put_case(case)
-        return {"case_id": case["case_id"], "slot": slot,
-                "image_url": f"/image/{case['case_id']}"}
+    _wait_ready()
+    with _LOCK:
+        for cid in _ORDER:
+            case = _INDEX.get(cid)
+            if not case or case.get("final"):
+                continue
+            slot = _claimable_slot(case, u["id"])
+            if slot is None:
+                continue
+            case["slots"][slot] = {"annotator": u["id"], "claimed_at": _now(),
+                                   "expires_at": _now() + CLAIM_TTL, "done": False}
+            _touch(case)
+            return {"case_id": case["case_id"], "slot": slot,
+                    "image_url": f"/image/{case['case_id']}",
+                    "progress": _progress()}
     return JSONResponse({"detail": "nothing left to annotate"}, status_code=404)
 
 
@@ -224,23 +451,35 @@ _IMG_CACHE: dict = {}
 def _render_jpeg(case_id: str) -> bytes:
     if case_id in _IMG_CACHE:
         return _IMG_CACHE[case_id]
-    from io import BytesIO
+    from PIL import Image
+    if DEV_LOCAL:
+        p = os.path.join(IMAGE_REPO[6:], f"{case_id}.jpg")
+        if not os.path.exists(p):
+            raise HTTPException(404, f"image not found: {p}")
+        return _encode(Image.open(p).convert("L"), case_id)
 
     from huggingface_hub import hf_hub_download
-    from PIL import Image
     try:
         p = hf_hub_download(IMAGE_REPO, f"images/{case_id}.jpg", repo_type="dataset",
                             token=os.environ.get("HF_TOKEN"))
     except Exception as exc:                                 # noqa: BLE001
         raise HTTPException(404, f"image not found: {exc}")
-    im = Image.open(p).convert("L")
+    return _encode(Image.open(p).convert("L"), case_id)
+
+
+def _encode(im, case_id: str) -> bytes:
+    """Downscale + JPEG. case_id is REQUIRED: it is the cache key, and defaulting it to
+    "" cached every film under the same entry and served the first one forever."""
+    from io import BytesIO
+
+    from PIL import Image
     if im.width > DISPLAY_W:
         im = im.resize((DISPLAY_W, round(im.height * DISPLAY_W / im.width)),
                        Image.LANCZOS)
     buf = BytesIO()
     im.save(buf, format="JPEG", quality=88, optimize=True)
     data = buf.getvalue()
-    if len(_IMG_CACHE) < 400:              # bounded: a Space has finite memory
+    if case_id and len(_IMG_CACHE) < 400:  # bounded: a Space has finite memory
         _IMG_CACHE[case_id] = data
     return data
 
@@ -260,64 +499,201 @@ def peek(u: dict = Depends(user)):
     Claiming on prefetch would hand every annotator a second case the moment they opened
     one, and abandoned claims would pile up behind the TTL.
     """
-    st = _store()
-    for case in st.list_cases():
-        if case.get("final"):
-            continue
-        if _claimable_slot(case, u["id"]) is not None:
-            return {"case_id": case["case_id"]}
+    _wait_ready()
+    with _LOCK:
+        for cid in _ORDER:
+            case = _INDEX.get(cid)
+            if not case or case.get("final"):
+                continue
+            # The case being annotated right now already holds a slot belonging to this
+            # user, and _claimable_slot refuses a second slot to the same person -- so
+            # the first hit here is genuinely the NEXT film, not the current one.
+            if _claimable_slot(case, u["id"]) is not None:
+                return {"case_id": case["case_id"]}
     return JSONResponse({"detail": "none"}, status_code=404)
 
 
 @app.post("/submit")
-def submit(case_id: str = Form(...), slot: str = Form(...), points: str = Form(...),
+def submit(case_id: str = Form(...), slot: str = Form(...), points: str = Form(""),
+           not_visible: str = Form(""), reason: str = Form(""),
            u: dict = Depends(user)):
     """points: JSON {"left":[x,y]|null, "right":[x,y]|null, "note":str, "w":W, "h":H}
 
     Coordinates arrive NORMALISED to the displayed image and are stored that way. The
     browser scales the film to fit a screen of unknown size, so raw canvas pixels would
     silently encode each annotator's window size.
-    """
-    st = _store()
-    case = st.get_case(case_id)
-    if case is None:
-        raise HTTPException(404, "unknown case")
-    s = case.get("slots", {}).get(slot)
-    if not s or s.get("annotator") != u["id"]:
-        raise HTTPException(403, "that slot is not yours")
-    p = json.loads(points)
-    if p.get("left") is None and p.get("right") is None:
-        raise HTTPException(400, "mark at least one femoral head, or use /skip")
-    s.update(done=True, submitted_at=_now(), points=p)
 
-    done = [case["slots"][k] for k in ("1", "2")
-            if case.get("slots", {}).get(k, {}).get("done")]
-    if len(done) >= N_PRIMARY:
-        case["agree"] = _agreement(done[0]["points"], done[1]["points"])
-        if case["agree"] is not None and case["agree"] <= CONSENSUS_TOL:
-            case["final"] = {"points": _mean_points(done[0]["points"], done[1]["points"]),
-                             "by": "consensus"}
-    st.put_case(case)
-    return {"ok": True, "status": "final" if case.get("final") else "awaiting second"}
+    NOT VISIBLE IS AN ANSWER, NOT AN ABANDONMENT. It fills the reader's slot and needs
+    the same double read as a marked film. This matters because the open question these
+    annotations exist to settle is precisely "on what fraction of films can a trained eye
+    place this point at all" -- so an unreadable film is a DATUM. Releasing the slot
+    instead (which is what /skip does) would drop that film back in the pool and quietly
+    delete the very observation being collected.
+    """
+    _wait_ready()
+    with _LOCK:
+        case = _INDEX.get(case_id)
+        if case is None:
+            raise HTTPException(404, "unknown case")
+        s = case.get("slots", {}).get(slot)
+        if not s or s.get("annotator") != u["id"]:
+            raise HTTPException(403, "that slot is not yours")
+
+        nv = str(not_visible).lower() in ("1", "true", "yes", "on")
+        p = json.loads(points) if points else {}
+        if not nv and p.get("left") is None and p.get("right") is None:
+            raise HTTPException(400, "mark at least one femoral head, or use Not visible")
+        if nv:
+            s.update(done=True, submitted_at=_now(), points=None,
+                     not_visible=True, reason=reason)
+        else:
+            s.update(done=True, submitted_at=_now(), points=p, not_visible=False)
+
+        done = [case["slots"][k] for k in ("1", "2")
+                if case.get("slots", {}).get(k, {}).get("done")]
+        if len(done) >= N_PRIMARY:
+            _resolve(case, done)
+        _touch(case)
+        status = ("final" if case.get("final")
+                  else "needs adjudication" if case.get("disagree")
+                  else "awaiting second read")
+        return {"ok": True, "status": status, "progress": _progress()}
+
+
+def _resolve(case: dict, done: list) -> None:
+    """Decide a case once both reads are in.
+
+    Three outcomes, kept distinct because they mean different things downstream:
+      both readable and close  -> final, point = mean of the two
+      both not visible         -> final with NO point. A settled, usable observation:
+                                  this film has no placeable hip landmark.
+      anything else            -> disagreement, held for adjudication. That includes one
+                                  reader marking a point the other could not see, which
+                                  is the most interesting disagreement in the set and
+                                  must not be silently resolved either way.
+    """
+    nv = [bool(s.get("not_visible")) for s in done]
+    case.pop("disagree", None)
+    if all(nv):
+        case["final"] = {"points": None, "by": "consensus-not-visible"}
+        case["agree"] = None
+        return
+    if any(nv):
+        case["disagree"] = "one reader marked a point the other could not see"
+        case["agree"] = None
+        return
+    case["agree"] = _agreement(done[0]["points"], done[1]["points"])
+    if case["agree"] is not None and case["agree"] <= CONSENSUS_TOL:
+        case["final"] = {"points": _mean_points(done[0]["points"], done[1]["points"]),
+                         "by": "consensus"}
+    else:
+        case["disagree"] = f"readers differ by {case['agree']:.4f} of image width"
 
 
 @app.post("/skip")
 def skip(case_id: str = Form(...), slot: str = Form(...), reason: str = Form(""),
          u: dict = Depends(user)):
-    """Release a film whose femoral heads genuinely cannot be seen.
+    """Put a film BACK for someone else -- "not now", not "not visible".
 
-    A forced guess on an unreadable film is worse than no annotation: this set exists to
-    be a reference, and a fabricated reference point silently becomes a fabricated error
-    for the model being validated.
+    Use this for an interruption or a film you would rather another reader took. It
+    releases the slot and the case returns to the pool. If the femoral heads genuinely
+    cannot be seen, that is an ANSWER and belongs in /submit with not_visible=1, where it
+    counts toward the double read.
     """
-    st = _store()
-    case = st.get_case(case_id)
-    if case is None:
-        raise HTTPException(404, "unknown case")
-    case.setdefault("skipped_by", []).append({"by": u["id"], "reason": reason})
-    case.get("slots", {}).pop(slot, None)
-    st.put_case(case)
+    _wait_ready()
+    with _LOCK:
+        case = _INDEX.get(case_id)
+        if case is None:
+            raise HTTPException(404, "unknown case")
+        case.setdefault("passed_by", []).append({"by": u["id"], "reason": reason,
+                                                 "at": _now()})
+        case.get("slots", {}).pop(slot, None)
+        _touch(case)
     return {"ok": True}
+
+
+def _progress() -> dict:
+    """Cheap counters for the header. Runs over memory, so it is free to call per film."""
+    with _LOCK:
+        total = len(_INDEX)
+        reads = final = 0
+        for c in _INDEX.values():
+            reads += sum(1 for k in ("1", "2")
+                         if c.get("slots", {}).get(k, {}).get("done"))
+            final += bool(c.get("final"))
+    return {"total": total, "reads": reads, "reads_needed": total * N_PRIMARY,
+            "final": final}
+
+
+@app.get("/stats")
+def stats(u: dict = Depends(user)):
+    """Who has done what, and how much is left.
+
+    Deliberately visible to every annotator, not just adjudicators: people finish a long
+    repetitive job far more reliably when they can see the pile going down and see that
+    others are carrying their share.
+    """
+    _wait_ready()
+    import statistics
+    with _LOCK:
+        cases = list(_INDEX.values())
+
+    by: dict = {}
+    agrees, nv_cases = [], 0
+    counts = {"total": len(cases), "untouched": 0, "one_read": 0, "two_reads": 0,
+              "final": 0, "final_consensus": 0, "final_not_visible": 0,
+              "needs_adjudication": 0, "in_progress": 0}
+    for c in cases:
+        slots = c.get("slots", {})
+        done = [slots.get(k) for k in ("1", "2") if slots.get(k, {}).get("done")]
+        claimed = [slots.get(k) for k in ("1", "2")
+                   if slots.get(k) and not slots[k].get("done")]
+        for s in done:
+            r = by.setdefault(s["annotator"], {"reads": 0, "not_visible": 0})
+            r["reads"] += 1
+            r["not_visible"] += bool(s.get("not_visible"))
+        n = len(done)
+        counts["untouched"] += (n == 0 and not claimed)
+        counts["in_progress"] += bool(claimed)
+        counts["one_read"] += (n == 1)
+        counts["two_reads"] += (n >= 2)
+        if c.get("final"):
+            counts["final"] += 1
+            if c["final"].get("by") == "consensus-not-visible":
+                counts["final_not_visible"] += 1
+                nv_cases += 1
+            else:
+                counts["final_consensus"] += 1
+        counts["needs_adjudication"] += bool(c.get("disagree"))
+        if c.get("agree") is not None:
+            agrees.append(c["agree"])
+
+    counts["reads_done"] = sum(r["reads"] for r in by.values())
+    counts["reads_needed"] = counts["total"] * N_PRIMARY
+    counts["pct_complete"] = round(100 * counts["final"] / max(1, counts["total"]), 1)
+    # The headline number this whole exercise exists to produce.
+    settled = counts["final"] + counts["needs_adjudication"]
+    counts["not_visible_rate_pct"] = (round(100 * nv_cases / settled, 1)
+                                      if settled else None)
+    agree_stats = None
+    if agrees:
+        agree_stats = {
+            "n": len(agrees),
+            "median": round(statistics.median(agrees), 5),
+            "p90": round(sorted(agrees)[int(0.9 * (len(agrees) - 1))], 5),
+            "within_tol_pct": round(100 * sum(a <= CONSENSUS_TOL for a in agrees)
+                                    / len(agrees), 1),
+            "tolerance": CONSENSUS_TOL,
+        }
+    readers = sorted(({"annotator": k, **v} for k, v in by.items()),
+                     key=lambda r: -r["reads"])
+    return {"counts": counts, "readers": readers, "agreement": agree_stats,
+            "you": u["id"], "pending_writes": len(_DIRTY)}
+
+
+@app.get("/board", response_class=HTMLResponse)
+def board():
+    return BOARD
 
 
 def _agreement(a: dict, b: dict) -> Optional[float]:
@@ -339,161 +715,4 @@ def _mean_points(a: dict, b: dict) -> dict:
     return out
 
 
-PAGE = """<!doctype html><meta charset=utf-8>
-<title>Femoral head annotation</title>
-<style>
- body{font:14px system-ui;margin:0;background:#111;color:#eee}
- header{padding:8px 12px;background:#1b1b1f;display:flex;gap:10px;align-items:center;
-        flex-wrap:wrap}
- #wrap{position:relative;display:inline-block}
- canvas{cursor:none;max-height:86vh}
- #loupe{position:absolute;width:190px;height:190px;border:2px solid #0072B2;
-        border-radius:50%;pointer-events:none;display:none;box-shadow:0 0 12px #000;
-        background:#000;z-index:5}
- button{padding:6px 12px;border-radius:6px;border:0;cursor:pointer}
- .go{background:#0072B2;color:#fff}.sk{background:#666;color:#fff}
- #msg{margin-left:auto;color:#9ad}
- input{background:#222;color:#eee;border:1px solid #444;border-radius:5px;padding:5px}
- kbd{background:#333;padding:1px 5px;border-radius:3px;font-size:11px}
-</style>
-<header>
-  <input id=tok type=password placeholder="hf_... token" size=24>
-  <button class=go onclick=load()>Next</button>
-  <span>click <b style="color:#00E5A0">LEFT</b> head then
-        <b style="color:#FF3B30">RIGHT</b></span>
-  <button onclick=undo()>Undo <kbd>u</kbd></button>
-  <button class=go onclick=send()>Submit <kbd>enter</kbd></button>
-  <button class=sk onclick=skip()>Can't see <kbd>s</kbd></button>
-  <span id=msg></span>
-</header>
-<details id=help open>
- <summary style="cursor:pointer;padding:8px 12px;background:#22222a">
-   Criteria � read once, then collapse</summary>
- <div style="display:flex;gap:18px;padding:10px 14px;background:#191920">
-  <div style="max-width:640px;line-height:1.5">
-   <b>What the point is.</b> The hip axis is the line joining the <i>centres</i> of the two
-   femoral heads; the point used for PI/PT/SS is its midpoint
-   (Legaye &amp; Duval-Beaup�re 1998). The femoral head is very nearly a sphere, so its
-   projection is a circle � you are marking <b>the centre of that circle</b>.
-   <br><br>
-   <b>How to find it.</b>
-   <ol style="margin:4px 0 0 18px;padding:0">
-    <li>Find the round dense head below and anterior to the S1 endplate, seated in the
-        acetabulum.</li>
-    <li>Trace the <b>subchondral cortical arc</b> � the thin dense line of the articular
-        surface. That arc defines the circle.</li>
-    <li>Mark its <b>centre of curvature</b>, not the brightest spot. Overlap with the
-        acetabulum and the opposite head puts the densest shadow <i>medial</i> to the
-        true centre.</li>
-    <li>Use the magnifier � it follows the cursor at 4�.</li>
-   </ol>
-   <br>
-   <b>Do not centre on:</b> the fovea capitis (medial notch � a defect in the sphere),
-   the greater trochanter, the femoral neck or head�neck junction, the acetabular roof
-   or teardrop.
-   <br><br>
-   <b>One circle or two.</b> On a well-positioned lateral the heads superimpose � mark it
-   as <span style="color:#00E5A0">LEFT</span> and leave
-   <span style="color:#FF3B30">RIGHT</span> empty. If rotation separates them into two
-   overlapping circles, mark both; the midpoint is derived and their separation is
-   recorded, since a wide separation means an oblique film.
-   <br><br>
-   <b>Skip</b> for a prosthesis, heads outside the collimated field, or an exposure where
-   the cortical arc cannot be traced. Skipping is a valid answer � a guessed centre
-   becomes a fabricated error in whatever this set measures.
-  </div>
-  <div><img src="/example" style="max-height:330px;border:1px solid #444;border-radius:6px"
-       alt="worked example" onerror="this.style.display='none'">
-   <div style="font-size:11px;color:#888;max-width:300px;margin-top:4px">
-     Worked example on a synthetic radiograph, where the centre is a 3-D sphere fit rather
-     than anyone's opinion.</div></div>
- </div>
-</details>
-<div id=wrap><canvas id=c></canvas><canvas id=loupe width=190 height=190></canvas></div>
-<script>
-let img=new Image(), pts=[], cur=null, nextId=null, nextImg=null;
-const C=document.getElementById('c'), X=C.getContext('2d');
-const LP=document.getElementById('loupe'), LX=LP.getContext('2d');
-const H=()=>({Authorization:'Bearer '+document.getElementById('tok').value});
-const msg=t=>document.getElementById('msg').textContent=t;
-
-// PREFETCH: fetch the next film's bytes while this one is being annotated, so "Next"
-// is instant instead of a round trip to HuggingFace. /peek does not claim the case --
-// claiming on prefetch would hand everyone a second case they never opened.
-async function prefetch(){
-  try{
-    const r=await fetch('/peek',{headers:H()}); if(!r.ok)return;
-    const j=await r.json(); if(!j.case_id||j.case_id===nextId)return;
-    nextId=j.case_id;
-    const b=await fetch('/image/'+nextId,{headers:H()});
-    nextImg=URL.createObjectURL(await b.blob());
-  }catch(e){}
-}
-async function load(){
-  pts=[]; const t0=performance.now();
-  const r=await fetch('/next',{headers:H()});
-  if(!r.ok){msg('nothing left to annotate');return}
-  cur=await r.json();
-  const src=(cur.case_id===nextId&&nextImg)?nextImg:null;
-  img=new Image();
-  img.onload=()=>{C.width=img.width;C.height=img.height;draw();
-                  msg(cur.case_id+'  slot '+cur.slot+'  ('+Math.round(performance.now()-t0)+' ms)');
-                  nextId=null;nextImg=null;prefetch();};
-  if(src){img.src=src}
-  else{const b=await fetch(cur.image_url,{headers:H()});
-       img.src=URL.createObjectURL(await b.blob());}
-}
-function draw(){
-  X.drawImage(img,0,0);
-  pts.forEach((p,i)=>{
-    X.strokeStyle=i===0?'#00E5A0':'#FF3B30';X.lineWidth=Math.max(1.5,img.width/700);
-    const x=p[0]*img.width,y=p[1]*img.height,r=img.width/80;
-    X.beginPath();X.arc(x,y,r,0,7);X.stroke();
-    X.beginPath();X.moveTo(x-r*1.7,y);X.lineTo(x+r*1.7,y);
-    X.moveTo(x,y-r*1.7);X.lineTo(x,y+r*1.7);X.stroke();
-  });
-}
-// MAGNIFIER: a femoral head centre is judged by the curvature of a faint arc, and the
-// film is displayed scaled down to fit the screen. Without this the annotator's precision
-// is set by the display scale rather than by the anatomy.
-C.addEventListener('mousemove',e=>{
-  const r=C.getBoundingClientRect();
-  const fx=(e.clientX-r.left)/r.width, fy=(e.clientY-r.top)/r.height;
-  const sx=fx*img.width, sy=fy*img.height, Z=4, S=190/Z;
-  LX.fillStyle='#000';LX.fillRect(0,0,190,190);
-  LX.drawImage(img, sx-S/2, sy-S/2, S, S, 0,0,190,190);
-  LX.strokeStyle='#0072B2';LX.lineWidth=1;
-  LX.beginPath();LX.moveTo(95,80);LX.lineTo(95,110);LX.moveTo(80,95);LX.lineTo(110,95);
-  LX.stroke();
-  LP.style.display='block';
-  LP.style.left=(e.clientX-r.left+18)+'px';
-  LP.style.top=(e.clientY-r.top-210)+'px';
-});
-C.addEventListener('mouseleave',()=>LP.style.display='none');
-C.addEventListener('click',e=>{
-  if(pts.length>=2)return;
-  const r=C.getBoundingClientRect();
-  pts.push([(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]);draw();
-});
-function undo(){pts.pop();draw()}
-async function send(){
-  if(!cur||!pts.length){msg('mark at least one head');return}
-  const b=new FormData();
-  b.append('case_id',cur.case_id);b.append('slot',cur.slot);
-  b.append('points',JSON.stringify({left:pts[0]||null,right:pts[1]||null,
-                                    w:img.width,h:img.height}));
-  const r=await fetch('/submit',{method:'POST',headers:H(),body:b});
-  if(r.ok){load()}else{msg('error saving')}
-}
-async function skip(){
-  const b=new FormData();
-  b.append('case_id',cur.case_id);b.append('slot',cur.slot);
-  b.append('reason',prompt('why is it unreadable?')||'');
-  await fetch('/skip',{method:'POST',headers:H(),body:b});load();
-}
-document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT')return;
-  if(e.key==='u')undo(); else if(e.key==='Enter')send(); else if(e.key==='s')skip();
-});
-</script>
-"""
+from ui import BOARD, PAGE  # noqa: E402  (markup lives next door)

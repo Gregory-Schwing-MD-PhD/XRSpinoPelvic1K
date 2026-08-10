@@ -23,7 +23,15 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from review import schema  # noqa: E402
+# OPTIONAL. This file is a copy of the CTSpinoPelvic1K review service's store, and
+# `review.schema` lives in THAT repo's scripts/ tree -- it is not shipped in this Space's
+# Docker image. Only the CTSpinoPelvic1K seeding/triage helpers below touch it; the
+# femoral-head annotator uses just the backends and list/get/put_case. A hard import made
+# the Space fail to boot on a dependency it never calls.
+try:
+    from review import schema  # noqa: E402
+except ModuleNotFoundError:                                    # pragma: no cover
+    schema = None  # type: ignore[assignment]
 
 
 # ── backends ─────────────────────────────────────────────────────────────────

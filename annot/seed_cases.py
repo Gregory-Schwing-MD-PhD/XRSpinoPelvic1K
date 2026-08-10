@@ -112,12 +112,24 @@ def main(argv=None):
     # annotators need no read access to any dataset -- the same containment the review
     # service uses for labels. Only films not already uploaded are sent: at 2000 films
     # a second pass would otherwise re-push several GB to no effect.
+    # ONE COMMIT FOR THE WHOLE SET, not one per film. upload_file commits every call,
+    # and the Hub caps repository commits at 128/hour -- seeding 2000 films that way
+    # died at film ~128 with a 429 and would have needed 16 hours even if it hadn't.
+    # upload_folder batches the files into a handful of commits instead.
     todo = [r for r in pick if r["case"] not in have_img]
-    for i, r in enumerate(todo, 1):
-        api.upload_file(path_or_fileobj=r["img"], path_in_repo=f"images/{r['case']}.jpg",
-                        repo_id=a.image_repo, repo_type="dataset")
-        if i % 200 == 0:
-            print(f"    uploaded {i}/{len(todo)}", flush=True)
+    if todo:
+        import shutil
+        import tempfile
+        stage = tempfile.mkdtemp(prefix="femhead_stage_")
+        try:
+            for r in todo:
+                shutil.copyfile(r["img"], os.path.join(stage, f"{r['case']}.jpg"))
+            print(f"  staged {len(todo)} films, uploading as a folder…", flush=True)
+            api.upload_folder(folder_path=stage, path_in_repo="images",
+                              repo_id=a.image_repo, repo_type="dataset",
+                              commit_message=f"seed {len(todo)} BUU lateral films")
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
     print(f"  uploaded {len(todo)} new films to {a.image_repo} "
           f"({len(have_img)} already present)")
     ops = []
