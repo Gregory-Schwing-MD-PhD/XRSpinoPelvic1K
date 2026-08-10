@@ -81,11 +81,17 @@ def main() -> int:
     # The ledger write token. A secret, not a variable: variables are visible in the UI.
     api.add_space_secret(a.space, "HF_TOKEN", token)
 
-    url = f"https://huggingface.co/spaces/{a.space}"
-    print(f"\n  deployed: {url}")
-    print(f"  readers:  {url.replace('huggingface.co/spaces/', 'hf.space/').rstrip('/')}"
-          "  (direct app URL)")
-    print(f"  board:    {url}  ->  /board")
+    # The app lives on <owner>-<name>.hf.space, NOT huggingface.co/spaces/<owner>/<name>
+    # (that is the repo page) and NOT hf.space/<owner>/<name> (which 404s).
+    owner, _, name = a.space.partition("/")
+    host = f"https://{owner}-{name}".replace("_", "-").lower() + ".hf.space"
+    print(f"\n  repo   : https://huggingface.co/spaces/{a.space}")
+    print(f"  READERS: {host}")
+    print(f"  board  : {host}/board")
+    if api.space_info(a.space).private:
+        print("\n  This Space is PRIVATE — readers cannot open it until they are added\n"
+              "  under Settings -> Collaborators. Making it public would let any\n"
+              "  HuggingFace account sign in and pull the films.")
     return 0
 
 
