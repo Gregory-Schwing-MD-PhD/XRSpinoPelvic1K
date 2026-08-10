@@ -251,6 +251,13 @@ async function load(){
   try{
     const r=await fetch('/next',{headers:H()});
     if(r.status===401){$('appui').hidden=true;$('gate').hidden=false;return}
+    if(r.status===403){msg(await r.text());
+      $('appui').hidden=true;$('gate').hidden=false;
+      $('gate').insertAdjacentHTML('afterbegin',
+        '<p style="color:#f5a524;max-width:60ch;margin:0 auto 14px">'
+        +'You are signed in, but not on the reader list for this study. '
+        +'Send Greg your HuggingFace username.</p>');
+      return}
     if(!r.ok){msg('nothing left to annotate — thank you');cur=null;return}
     cur=await r.json(); progress(cur.progress);
     const src=(cur.case_id===nextId&&nextImg)?nextImg:null;

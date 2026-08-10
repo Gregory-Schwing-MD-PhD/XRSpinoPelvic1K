@@ -104,9 +104,19 @@ N_PRIMARY = 2
 # under the effect size; anything looser silently caps the precision of every conclusion
 # drawn from it.
 CONSENSUS_TOL = float(os.environ.get("CONSENSUS_TOL", 0.005))
-ADJUDICATORS = {u.strip().lower()
-                for u in os.environ.get("ADJUDICATORS", "").replace(",", " ").split()
-                if u.strip()}
+def _userset(name: str) -> set:
+    return {u.strip().lower()
+            for u in os.environ.get(name, "").replace(",", " ").split() if u.strip()}
+
+
+ADJUDICATORS = _userset("ADJUDICATORS")
+# Who may read films. Empty = anyone signed in, which is right for an open pilot and
+# wrong here: the films are BUU-LSPINE, redistribution is not ours to grant, and the
+# alternative (a private Space) 404s for every reader until each one is added as a
+# collaborator -- including the owner, because the .hf.space subdomain does not share a
+# huggingface.co login cookie. A public Space plus this list gives the readers a URL
+# that simply works while keeping the films to named people.
+READERS = _userset("READERS")
 
 app = FastAPI(title="Femoral head annotation")
 _WHOAMI: dict = {}
@@ -356,7 +366,12 @@ def user(authorization: str = Header(default=""),
         name = _hf_username(tok)
     if not name:
         raise HTTPException(401, "sign in with HuggingFace")
-    return {"id": name, "role": "adjudicator" if name.lower() in ADJUDICATORS else "primary"}
+    low = name.lower()
+    if READERS and low not in READERS and low not in ADJUDICATORS:
+        raise HTTPException(
+            403, f"{name} is not on the reader list for this study. Ask Greg to add "
+                 f"your HuggingFace username.")
+    return {"id": name, "role": "adjudicator" if low in ADJUDICATORS else "primary"}
 
 
 @app.get("/whoami")
