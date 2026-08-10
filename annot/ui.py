@@ -200,7 +200,9 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <script>
 let img=new Image(), pts=[], cur=null, nextId=null, nextImg=null, token=null, busy=false;
 const $=i=>document.getElementById(i);
-const H=()=>token?{Authorization:'Bearer '+token}:{};
+// X-Annot-Token, not Authorization: on a private Space the Hub proxy
+// consumes Authorization before the app ever sees it.
+const H=()=>token?{'X-Annot-Token':token}:{};
 const msg=t=>$('msg').textContent=t;
 
 function useToken(){

@@ -105,8 +105,17 @@ class HFBackend:
         self.repo_id = repo_id
         self.repo_type = repo_type
         self.token = token
-        create_repo(repo_id=repo_id, repo_type=repo_type, private=True,
-                    exist_ok=True, token=token)
+        # Best effort. exist_ok=True still calls the CREATE endpoint, and a fine-grained
+        # token scoped to write an existing repo is routinely refused there -- which
+        # took down the whole ledger with "403: you don't have the rights to create a
+        # dataset under this namespace" on a repo that already existed and was readable.
+        # If the repo is genuinely missing the first read will say so, loudly and in the
+        # right place.
+        try:
+            create_repo(repo_id=repo_id, repo_type=repo_type, private=True,
+                        exist_ok=True, token=token)
+        except Exception:                                      # noqa: BLE001
+            pass
 
     def exists(self, path: str) -> bool:
         try:

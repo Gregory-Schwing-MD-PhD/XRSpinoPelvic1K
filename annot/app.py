@@ -334,14 +334,25 @@ def auth_logout():
 
 
 def user(authorization: str = Header(default=""),
+         x_annot_token: str = Header(default=""),
          annot_session: str = Cookie(default="")) -> dict:
+    """Identity, in order of preference: the signed session cookie (OAuth), then a
+    pasted token.
+
+    The pasted token is read from X-Annot-Token, NOT just Authorization. On a PRIVATE
+    Space the Hub's own proxy consumes the Authorization header to decide whether the
+    caller may reach the Space at all, so it never arrives here -- the token fallback
+    looked broken while being eaten one layer up. Authorization is still accepted for
+    local runs and tests, where nothing is in front of the app.
+    """
     name = _unsign(annot_session)
     if not name and DEV_LOCAL:
         # dev only: whoami would need a real token and a network round trip
         name = (authorization[7:] if authorization.lower().startswith("bearer ")
                 else "") or None
     if not name:
-        tok = authorization[7:] if authorization.lower().startswith("bearer ") else ""
+        tok = x_annot_token.strip() or (
+            authorization[7:] if authorization.lower().startswith("bearer ") else "")
         name = _hf_username(tok)
     if not name:
         raise HTTPException(401, "sign in with HuggingFace")
