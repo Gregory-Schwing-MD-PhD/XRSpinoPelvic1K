@@ -20,8 +20,7 @@ Three things here are deliberate rather than decorative:
 """
 
 CRITERIA = """
-<details id=help open>
- <summary>Criteria &mdash; read once, then collapse</summary>
+<aside id=guide>
  <div class=helpbody>
   <div class=helptext>
    <p><b>What you are marking.</b> The <b>centre of the femoral head</b>. The head is
@@ -58,7 +57,9 @@ CRITERIA = """
     <li>Mark its <b>centre of curvature</b>, <u>not</u> the brightest spot. Overlap with
         the acetabulum and the opposite head puts the densest shadow <i>medial</i> to the
         true centre &mdash; that error is systematic, not noise.</li>
-    <li>Use the magnifier: it follows the cursor at 4&times;.</li>
+    <li>If the arc is faint, press <kbd>m</kbd> for a 4&times; magnifier that
+        follows the cursor. It is off by default because it covers the anatomy
+        beside the point you are placing.</li>
    </ol>
 
    <p><b>Do not centre on</b> the fovea capitis (the medial notch &mdash; a defect in the
@@ -94,7 +95,7 @@ CRITERIA = """
    </figure>
   </div>
  </div>
-</details>
+</aside>
 """
 
 STYLE = """
@@ -103,6 +104,7 @@ STYLE = """
  body{font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;margin:0;
       background:#111;color:#eee}
  a{color:#6cf}
+ :root{--hdr:53px}
  header{padding:8px 12px;background:#1b1b1f;display:flex;gap:10px;align-items:center;
         flex-wrap:wrap;position:sticky;top:0;z-index:10;border-bottom:1px solid #2a2a33}
  button{padding:7px 13px;border-radius:6px;border:0;cursor:pointer;font:inherit;
@@ -118,23 +120,42 @@ STYLE = """
  .bar{height:6px;background:#23232b;border-radius:3px;width:150px;overflow:hidden}
  .bar>i{display:block;height:100%;background:var(--lft)}
  .lft{color:var(--lft)}.rgt{color:var(--rgt)}
- #wrap{position:relative;display:inline-block}
- canvas{cursor:none;max-height:82vh}
+ /* Two panels. The guide scrolls on its own so the film never moves while you read,
+    and the film column is what the window resize actually gives space to. */
+ #split{display:grid;grid-template-columns:var(--guide,430px) 1fr;
+        height:calc(100vh - var(--hdr));min-height:0}
+ #split.noguide{grid-template-columns:0 1fr}
+ /* visibility, NOT display:none. Removing the guide from the grid drops the
+    film into the first (zero-width) column and it collapses to nothing. */
+ #split.noguide #guide{visibility:hidden;border-right:0}
+ #guide{overflow-y:auto;overflow-x:hidden;border-right:1px solid #2a2a33;min-width:0;
+        background:#191920}
+ /* BOTTOM GUTTER. The Windows taskbar auto-shows when the pointer reaches the last few
+    pixels of the screen, which made the bottom of the film unclickable. Reserving a
+    strip below the image means the cursor never has to go there to reach anatomy. */
+ #stage{display:flex;align-items:center;justify-content:center;overflow:auto;min-width:0;
+        padding:10px 12px calc(64px + env(safe-area-inset-bottom,0px))}
+ #wrap{position:relative;display:block}
+ /* Display size is set in JS by fit(), not by CSS. A percentage max-height has no
+    definite parent height to resolve against through this flex chain, so the canvas
+    rendered at its natural 1100x1919 and ran off the bottom of the window. */
+ canvas{cursor:crosshair;display:block}
+ body.zoom canvas{cursor:none}
  #loupe{position:absolute;width:190px;height:190px;border:2px solid var(--go);
         border-radius:50%;pointer-events:none;display:none;box-shadow:0 0 12px #000;
         background:#000;z-index:5}
  details>summary{cursor:pointer;padding:8px 12px;background:#22222a;font-weight:600}
- .helpbody{display:flex;gap:20px;padding:12px 16px;background:#191920;flex-wrap:wrap}
- .helptext{max-width:660px}
+ .helpbody{padding:12px 16px;background:#191920}
+ .helptext{max-width:none}
  .helptext p{margin:0 0 10px}
  .helptext ol{margin:4px 0 10px 18px;padding:0}
  .helptext li{margin:3px 0}
  .cite{background:#15151b;border-left:3px solid var(--go);padding:8px 10px;
        font-size:13px;color:#c8d2dc}
  .warn{background:#241d0c;border-left:3px solid var(--warn);padding:8px 10px}
- .helpimgs{display:flex;gap:14px;flex-wrap:wrap}
- .helpimgs figure{margin:0;max-width:320px}
- .helpimgs img{max-height:330px;max-width:100%;border:1px solid #444;border-radius:6px;
+ .helpimgs{display:flex;flex-direction:column;gap:14px;margin-top:12px}
+ .helpimgs figure{margin:0;max-width:100%}
+ .helpimgs img{max-height:none;max-width:100%;cursor:zoom-in;border:1px solid #444;border-radius:6px;
                display:block}
  .helpimgs figcaption{font-size:11px;color:#888;margin-top:4px}
  .signin{padding:40px;text-align:center}
@@ -189,16 +210,26 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
   <a href="/board" target="_blank" class=ghost
      style="text-decoration:none;padding:7px 13px;border-radius:6px;
             border:1px solid #3a3a44">Board</a>
+  <button class=ghost onclick=toggleGuide()>Guide <kbd>g</kbd></button>
+  <button class=ghost id=zoomBtn onclick=toggleZoom()>Zoom <kbd>m</kbd></button>
   <span id=who></span>
   <div class=bar title="cases finalised"><i id=barfill style="width:0"></i></div>
   <span id=msg></span>
 </header>
+<main id=split>
 """ + CRITERIA + """
-<div id=wrap><canvas id=c></canvas><canvas id=loupe width=190 height=190></canvas></div>
+  <section id=stage>
+    <div id=wrap><canvas id=c></canvas><canvas id=loupe width=190 height=190></canvas></div>
+  </section>
+</main>
 </div>
 
 <script>
 let img=new Image(), pts=[], cur=null, nextId=null, nextImg=null, token=null, busy=false;
+// The loupe follows the cursor and covers the anatomy next to the point you are
+// placing. It is a real precision aid on a faint arc, so it stays -- but OFF by
+// default and remembered, rather than imposed on every reader.
+let zoomOn=false, guideOn=true;
 const $=i=>document.getElementById(i);
 // X-Annot-Token, not Authorization: on a private Space the Hub proxy
 // consumes Authorization before the app ever sees it.
@@ -221,6 +252,10 @@ async function boot(){
 }
 async function start(){
   $('gate').hidden=true; $('appui').hidden=false;
+  try{
+    toggleZoom(localStorage.getItem('annot_zoom')==='1');
+    toggleGuide(localStorage.getItem('annot_guide')!=='0');
+  }catch(e){ toggleZoom(false); }
   if(token && !$('who').textContent){
     $('who').textContent='using pasted token';
   }
@@ -262,7 +297,7 @@ async function load(){
     cur=await r.json(); progress(cur.progress);
     const src=(cur.case_id===nextId&&nextImg)?nextImg:null;
     img=new Image();
-    img.onload=()=>{C.width=img.width;C.height=img.height;draw();
+    img.onload=()=>{C.width=img.width;C.height=img.height;fit();draw();
       msg(cur.case_id+'  slot '+cur.slot+'  ('+Math.round(performance.now()-t0)+' ms)');
       nextId=null;nextImg=null;prefetch();};
     if(src){img.src=src}
@@ -272,6 +307,19 @@ async function load(){
 }
 const C=$('c'), X=C.getContext('2d');
 const LP=$('loupe'), LX=LP.getContext('2d');
+// Fit the film to the space left over, preserving aspect ratio, and leave a strip at
+// the bottom: the Windows taskbar auto-shows at the last few pixels of the screen and
+// eats the pointer before it reaches the caudal anatomy.
+const BOTTOM_GUTTER = 64;
+function fit(){
+  if(!img.width) return;
+  const st=$('stage').getBoundingClientRect();
+  const availW=Math.max(80, st.width-24);
+  const availH=Math.max(80, window.innerHeight-st.top-BOTTOM_GUTTER-12);
+  const k=Math.min(availW/img.width, availH/img.height);
+  C.style.width =(img.width*k)+'px';
+  C.style.height=(img.height*k)+'px';
+}
 function draw(){
   X.drawImage(img,0,0);
   pts.forEach((p,i)=>{
@@ -286,7 +334,7 @@ function draw(){
 // film is displayed scaled down to fit the screen. Without this the annotator's
 // precision is set by the display scale rather than by the anatomy.
 C.addEventListener('mousemove',e=>{
-  if(!img.width)return;
+  if(!img.width||!zoomOn)return;
   const r=C.getBoundingClientRect();
   const fx=(e.clientX-r.left)/r.width, fy=(e.clientY-r.top)/r.height;
   const sx=fx*img.width, sy=fy*img.height, Z=4, S=190/Z;
@@ -306,6 +354,21 @@ C.addEventListener('click',e=>{
   pts.push([(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]);draw();
 });
 function undo(){pts.pop();draw()}
+
+function toggleZoom(on){
+  zoomOn = (on===undefined) ? !zoomOn : on;
+  document.body.classList.toggle('zoom', zoomOn);
+  $('zoomBtn').classList.toggle('ctl--on', zoomOn);
+  $('zoomBtn').style.borderColor = zoomOn ? '#0072B2' : '';
+  if(!zoomOn) LP.style.display='none';
+  try{localStorage.setItem('annot_zoom', zoomOn?'1':'0')}catch(e){}
+}
+function toggleGuide(on){
+  guideOn = (on===undefined) ? !guideOn : on;
+  $('split').classList.toggle('noguide', !guideOn);
+  requestAnimationFrame(fit);
+  try{localStorage.setItem('annot_guide', guideOn?'1':'0')}catch(e){}
+}
 
 async function post(url,fields){
   const b=new FormData();
@@ -343,7 +406,10 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='v')notVisible();
   else if(e.key==='p')pass();
   else if(e.key==='n')load();
+  else if(e.key==='m')toggleZoom();
+  else if(e.key==='g')toggleGuide();
 });
+window.addEventListener('resize', fit);
 boot();
 </script>
 """

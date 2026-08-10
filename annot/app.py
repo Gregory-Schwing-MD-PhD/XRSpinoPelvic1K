@@ -355,15 +355,16 @@ def user(authorization: str = Header(default=""),
     looked broken while being eaten one layer up. Authorization is still accepted for
     local runs and tests, where nothing is in front of the app.
     """
+    raw = x_annot_token.strip() or (
+        authorization[7:] if authorization.lower().startswith("bearer ") else "")
     name = _unsign(annot_session)
     if not name and DEV_LOCAL:
-        # dev only: whoami would need a real token and a network round trip
-        name = (authorization[7:] if authorization.lower().startswith("bearer ")
-                else "") or None
+        # dev only: whoami would need a real token and a network round trip. Reads the
+        # SAME header the browser sends -- checking only Authorization here meant the
+        # local UI 401'd the moment the frontend moved to X-Annot-Token.
+        name = raw or None
     if not name:
-        tok = x_annot_token.strip() or (
-            authorization[7:] if authorization.lower().startswith("bearer ") else "")
-        name = _hf_username(tok)
+        name = _hf_username(raw)
     if not name:
         raise HTTPException(401, "sign in with HuggingFace")
     low = name.lower()
