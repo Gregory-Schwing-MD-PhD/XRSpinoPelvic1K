@@ -7,8 +7,6 @@ sdk: docker
 app_port: 7860
 pinned: false
 hf_oauth: true
-hf_oauth_scopes:
-  - profile
 hf_oauth_expiration_minutes: 43200
 ---
 
