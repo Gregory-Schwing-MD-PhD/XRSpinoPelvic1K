@@ -97,3 +97,53 @@ Seed the ledger and upload the films:
 Annotators paste their own HF token; the Space verifies it with `whoami` and uses the
 returned username as identity. It caches only `sha256(token) -> username`, never the token.
 Films are streamed **through** the Space, so annotators need no read access to any dataset.
+
+---
+
+## For readers — how to start
+
+1. **Make a HuggingFace account** at <https://huggingface.co/join> if you do not have
+   one (about a minute, free). Tell Greg your username so your reads are attributed.
+2. Open the annotator link and press **Sign in with HuggingFace**.
+3. Read the **Criteria** panel once, then collapse it. It carries the definition, the
+   reference figure and a worked example.
+4. For each film: click the **left** femoral head centre, then the **right** one if
+   rotation has separated them, and press **Enter**.
+
+### The controls
+
+| key | action |
+|---|---|
+| click | place a point (first = left head, second = right) |
+| <kbd>u</kbd> | undo the last point |
+| <kbd>Enter</kbd> | submit and load the next film |
+| <kbd>v</kbd> | **femoral head not visible** — a real answer, see below |
+| <kbd>p</kbd> | pass this film to another reader (records nothing) |
+| <kbd>n</kbd> | next film |
+
+The magnifier follows your cursor at 4×. The next film is fetched while you work on the
+current one, so **Enter** should be instant.
+
+### "Femoral head not visible" is an answer, not a failure
+
+Press it for a prosthesis, heads outside the collimated field, or an exposure where the
+subchondral arc simply cannot be traced. It **counts as your read** and still needs a
+second reader to agree — the fraction of films with no placeable hip point is one of the
+things this study is measuring, so recording it honestly is the job. **Please do not
+guess**: a fabricated centre becomes a fabricated error in everything measured from this
+set.
+
+Use **Pass** only to hand a film to someone else.
+
+### Two reads per film
+
+Every film is read independently by two people, and nobody is ever offered a film they
+have already read. If the two reads agree within tolerance the mean is taken; if they
+disagree, or if one reader marks a point the other could not see, the film is held for
+adjudication rather than averaged.
+
+### Progress
+
+**/board** shows films finalised, reads done against the two-per-film target, how many
+await a second read, how many need adjudication, the not-visible rate, and a per-reader
+table. It refreshes every 10 seconds.

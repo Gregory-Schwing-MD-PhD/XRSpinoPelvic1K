@@ -1,0 +1,80 @@
+"""Create/update the femoral-head annotation Space and set its configuration.
+
+    HF_TOKEN=... python annot/deploy.py [--space owner/name] [--adjudicators a,b]
+
+Idempotent: re-running redeploys the code and leaves the ledger untouched, so this is
+also the "push a fix" command.
+
+NOTE ON HOSTING. HuggingFace now requires a PRO subscription to create a Docker Space on
+free cpu-basic hardware ("Static Spaces are free for everyone, but hosting Gradio and
+Docker Spaces on free cpu-basic requires a PRO subscription"). Spaces created before that
+change still run. This tool needs a server -- it holds the claim ledger, streams the
+films so readers never get access to the image repo, and enforces the two-reader rule --
+so a static Space cannot host it.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--space", default="gregoryschwingmdphd/xrsp-femhead-annot")
+    ap.add_argument("--annot-repo", default="gregoryschwingmdphd/xrsp-femhead-annot")
+    ap.add_argument("--image-repo", default="gregoryschwingmdphd/xrsp-femhead-images")
+    ap.add_argument("--adjudicators", default="gregoryschwingmdphd")
+    ap.add_argument("--private", action="store_true",
+                    help="private Space; readers then need to be added as collaborators")
+    a = ap.parse_args()
+
+    token = os.environ.get("HF_TOKEN") or ""
+    if not token:
+        cached = Path.home() / ".cache/huggingface/token"
+        token = cached.read_text().strip() if cached.exists() else ""
+    if not token:
+        print("set HF_TOKEN (a write token)", file=sys.stderr)
+        return 2
+
+    from huggingface_hub import HfApi
+    api = HfApi(token=token)
+
+    try:
+        api.create_repo(a.space, repo_type="space", space_sdk="docker",
+                        private=a.private, exist_ok=True)
+    except Exception as exc:                                   # noqa: BLE001
+        if "402" in str(exc):
+            print("\n  HuggingFace refused to create the Space: Docker Spaces on free\n"
+                  "  cpu-basic now need a PRO subscription (https://huggingface.co/pro).\n"
+                  "  Existing Spaces are unaffected; pass --space owner/existing-name to\n"
+                  "  redeploy into one you already have.\n", file=sys.stderr)
+        raise
+
+    api.upload_folder(
+        folder_path=str(HERE), repo_id=a.space, repo_type="space",
+        # tests, the figure generator and its ostk dependency have no business in the
+        # image; example/reference PNGs DO ship, they are what the readers look at
+        ignore_patterns=["__pycache__/*", "*.pyc", "test_annot.py", "make_reference.py",
+                         "deploy.py"],
+        commit_message="deploy femoral-head annotator")
+
+    for k, v in {"ANNOT_REPO": a.annot_repo, "IMAGE_REPO": a.image_repo,
+                 "ADJUDICATORS": a.adjudicators}.items():
+        api.add_space_variable(a.space, k, v)
+    # The ledger write token. A secret, not a variable: variables are visible in the UI.
+    api.add_space_secret(a.space, "HF_TOKEN", token)
+
+    url = f"https://huggingface.co/spaces/{a.space}"
+    print(f"\n  deployed: {url}")
+    print(f"  readers:  {url.replace('huggingface.co/spaces/', 'hf.space/').rstrip('/')}"
+          "  (direct app URL)")
+    print(f"  board:    {url}  ->  /board")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
