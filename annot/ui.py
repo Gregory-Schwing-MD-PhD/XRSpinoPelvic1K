@@ -38,15 +38,6 @@ CRITERIA = """
    target="_blank" rel="noopener">Radiopaedia &mdash; pelvic incidence</a>
    (femoral head centres as the pelvic reference axis).</p>
 
-   <p><b>Why this point matters.</b> <b>PI</b> is the angle between the line
-   perpendicular to the S1 endplate at its midpoint and the line from that midpoint to
-   this hip axis. PI is <b>morphological and posture-invariant</b> &mdash; fixed once the
-   skeleton matures, the same supine, standing or sitting &mdash; and
-   <b>PI = PT + SS</b>. It sets how much lumbar lordosis a given patient <i>needs</i>,
-   drives the Roussouly type, and is the basis of the PI&minus;LL target used to plan
-   deformity correction. <b>Without this point PI and PT cannot be computed at all</b>,
-   which is exactly why these reads are being collected.</p>
-
    <p><b>How to find it.</b></p>
    <ol>
     <li>Find the round dense head below and anterior to the S1 endplate, seated in the

@@ -165,12 +165,85 @@ _READY = threading.Event()
 _LOAD_ERR: list = []
 
 
-def _load_index() -> None:
-    """One pass over the repo at startup. Slow by nature; it happens once."""
+# index.json is a single consolidated copy of every case, written by the flusher. It
+# exists purely for boot time: fetching 2000 individual case files takes 25 s even at 16
+# workers, and /next blocks on it, so every Space restart looked broken for half a
+# minute. One file takes about a second.
+#
+# The per-case files remain the source of truth -- they are what the seeder writes and
+# what any later analysis reads. index.json is a cache, and it is USED ONLY IF it still
+# covers exactly the case set manifest.json lists. A stale index would silently hide
+# films from the queue, so a mismatch falls back to the slow path rather than trusting it.
+INDEX_FILE = "index.json"
+INDEX_EVERY = float(os.environ.get("INDEX_EVERY", 120))
+_LAST_INDEX = [0.0]
+
+
+def _hf_json(path: str):
+    from huggingface_hub import hf_hub_download
+    fp = hf_hub_download(ANNOT_REPO, path, repo_type="dataset",
+                         token=os.environ.get("HF_TOKEN"))
+    with open(fp, "rb") as fh:
+        return json.loads(fh.read())
+
+
+def _load_from_index():
     try:
-        cases = _store().list_cases()
+        want = set(_hf_json("manifest.json").get("cases") or [])
+        cases = _hf_json(INDEX_FILE)
+        if want and {c["case_id"] for c in cases} == want:
+            return cases
+    except Exception:                                          # noqa: BLE001
+        pass
+    return None
+
+
+def _load_from_snapshot():
+    from huggingface_hub import snapshot_download
+    root = snapshot_download(ANNOT_REPO, repo_type="dataset",
+                             allow_patterns="cases/*.json", max_workers=16,
+                             token=os.environ.get("HF_TOKEN"))
+    cdir = os.path.join(root, "cases")
+    cases = []
+    for fn in os.listdir(cdir):
+        if fn.endswith(".json"):
+            with open(os.path.join(cdir, fn), "rb") as fh:
+                cases.append(json.loads(fh.read()))
+    return cases
+
+
+def _write_index() -> None:
+    """Refresh the boot cache. Rate-limited: it is a couple of MB and boot time is the
+    only thing it buys, so it does not belong in every 3-second flush."""
+    if DEV_LOCAL or time.time() - _LAST_INDEX[0] < INDEX_EVERY:
+        return
+    with _LOCK:
+        blob = json.dumps(list(_INDEX.values())).encode()
+    try:
+        from huggingface_hub import HfApi
+        HfApi(token=os.environ.get("HF_TOKEN")).upload_file(
+            path_or_fileobj=blob, path_in_repo=INDEX_FILE, repo_id=ANNOT_REPO,
+            repo_type="dataset", commit_message="refresh boot index")
+        _LAST_INDEX[0] = time.time()
+    except Exception:                                          # noqa: BLE001
+        pass
+
+
+def _load_index() -> None:
+    """Load the whole ledger once, in ONE repo fetch.
+
+    store.list_cases() reads each case file over HTTP. At 2000 cases that is 2000
+    round trips before the first reader can be handed anything -- and /next blocks on
+    it, so every Space restart looked like the tool was broken for minutes. A snapshot
+    of cases/ is one download, then the parsing is local disk.
+    """
+    try:
+        if DEV_LOCAL:
+            cases = _store().list_cases()
+        else:
+            cases = _load_from_index() or _load_from_snapshot()
     except Exception as exc:                                   # noqa: BLE001
-        _LOAD_ERR.append(str(exc))
+        _LOAD_ERR.append(f"{type(exc).__name__}: {exc}")
         _READY.set()
         return
     with _LOCK:
@@ -179,6 +252,30 @@ def _load_index() -> None:
             _INDEX[c["case_id"]] = c
         _ORDER[:] = sorted(_INDEX)
     _READY.set()
+    threading.Thread(target=_prewarm, daemon=True).start()
+
+
+# ── image pre-warm ──────────────────────────────────────────────────────────────
+# The browser prefetches the NEXT film while you work on the current one, which hides
+# the download -- but only from the second film onward, and only if you pause long
+# enough. Rendering a few ahead server-side means the queue is already warm when the
+# reader arrives, including for the first film after a restart.
+PREWARM = int(os.environ.get("PREWARM", 12))
+
+
+def _prewarm() -> None:
+    done = 0
+    for cid in list(_ORDER):
+        if done >= PREWARM:
+            return
+        c = _INDEX.get(cid)
+        if not c or c.get("final") or cid in _IMG_CACHE:
+            continue
+        try:
+            _render_jpeg(cid)
+            done += 1
+        except Exception:                                      # noqa: BLE001
+            continue
 
 
 def _flush_once() -> int:
@@ -194,6 +291,7 @@ def _flush_once() -> int:
         with _LOCK:                       # put them back; try again next tick
             _DIRTY.update(ids)
         return 0
+    _write_index()
     return len(batch)
 
 
