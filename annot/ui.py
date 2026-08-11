@@ -48,9 +48,12 @@ CRITERIA = """
     <li>Mark its <b>centre of curvature</b>, <u>not</u> the brightest spot. Overlap with
         the acetabulum and the opposite head puts the densest shadow <i>medial</i> to the
         true centre &mdash; that error is systematic, not noise.</li>
-    <li>If the arc is faint, press <kbd>m</kbd> for a 4&times; magnifier that
-        follows the cursor. It is off by default because it covers the anatomy
-        beside the point you are placing.</li>
+    <li><b>Use the controls.</b> <b>Scroll</b> adjusts contrast and
+        <b>shift+scroll</b> brightness, like windowing a PACS study &mdash; a faint
+        subchondral arc usually appears with more contrast. <b>Ctrl+scroll</b> zooms
+        in about the cursor, and <kbd>r</kbd> resets. <b>Please zoom in before you
+        click</b>: at fit-to-window one screen pixel is several pixels of film, and
+        that alone limits how closely two readers can ever agree.</li>
    </ol>
 
    <p><b>Do not centre on</b> the fovea capitis (the medial notch &mdash; a defect in the
@@ -127,7 +130,6 @@ STYLE = """
  body{font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;margin:0;
       background:#111;color:#eee}
  a{color:#6cf}
- :root{--hdr:53px}
  header{padding:8px 12px;background:#1b1b1f;display:flex;gap:10px;align-items:center;
         flex-wrap:wrap;position:sticky;top:0;z-index:10;border-bottom:1px solid #2a2a33}
  button{padding:7px 13px;border-radius:6px;border:0;cursor:pointer;font:inherit;
@@ -140,13 +142,21 @@ STYLE = """
  kbd{background:#333;padding:1px 5px;border-radius:3px;font-size:11px;font-weight:400}
  #msg{margin-left:auto;color:#9ad;font-variant-numeric:tabular-nums}
  #who{color:#8a8;font-size:12px}
+ /* fixed width: this text changes on every scroll, and a header that
+    re-wraps when it grows moves the film out from under the cursor. */
+ #wl{font-family:var(--mono);font-size:11.5px;color:#8a94a0;
+     min-width:15ch;display:inline-block}
  .bar{height:6px;background:#23232b;border-radius:3px;width:150px;overflow:hidden}
  .bar>i{display:block;height:100%;background:var(--lft)}
  .lft{color:var(--lft)}.rgt{color:var(--rgt)}
  /* Two panels. The guide scrolls on its own so the film never moves while you read,
     and the film column is what the window resize actually gives space to. */
- #split{display:grid;grid-template-columns:var(--guide,430px) 1fr;
-        height:calc(100vh - var(--hdr));min-height:0}
+ /* Flex column, not a hardcoded header height: the header wraps to a second line as
+    buttons are added, and any fixed --hdr is wrong the moment it does. */
+ #appui{display:flex;flex-direction:column;height:100vh}
+ #appui[hidden]{display:none}
+ #split{flex:1 1 auto;display:grid;grid-template-columns:var(--guide,430px) 1fr;
+        min-height:0}
  #split.noguide{grid-template-columns:0 1fr}
  /* visibility, NOT display:none. Removing the guide from the grid drops the
     film into the first (zero-width) column and it collapses to nothing. */
@@ -163,10 +173,6 @@ STYLE = """
     definite parent height to resolve against through this flex chain, so the canvas
     rendered at its natural 1100x1919 and ran off the bottom of the window. */
  canvas{cursor:crosshair;display:block}
- body.zoom canvas{cursor:none}
- #loupe{position:absolute;width:190px;height:190px;border:2px solid var(--go);
-        border-radius:50%;pointer-events:none;display:none;box-shadow:0 0 12px #000;
-        background:#000;z-index:5}
  details>summary{cursor:pointer;padding:8px 12px;background:#22222a;font-weight:600}
  .helpbody{padding:12px 16px;background:#191920}
  .helptext{max-width:none}
@@ -235,7 +241,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
      style="text-decoration:none;padding:7px 13px;border-radius:6px;
             border:1px solid #3a3a44">Board</a>
   <button class=ghost onclick=toggleGuide()>Guide <kbd>g</kbd></button>
-  <button class=ghost id=zoomBtn onclick=toggleZoom()>Zoom <kbd>m</kbd></button>
+  <span id=wl title="scroll = contrast · shift+scroll = brightness · ctrl+scroll = zoom · r = reset"></span>
   <span id=who></span>
   <div class=bar title="cases finalised"><i id=barfill style="width:0"></i></div>
   <span id=msg></span>
@@ -243,17 +249,28 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <main id=split>
 """ + CRITERIA + """
   <section id=stage>
-    <div id=wrap><canvas id=c></canvas><canvas id=loupe width=190 height=190></canvas></div>
+    <div id=wrap><canvas id=c></canvas></div>
   </section>
 </main>
 </div>
 
 <script>
 let img=new Image(), pts=[], cur=null, nextId=null, nextImg=null, token=null, busy=false;
-// The loupe follows the cursor and covers the anatomy next to the point you are
-// placing. It is a real precision aid on a faint arc, so it stays -- but OFF by
-// default and remembered, rather than imposed on every reader.
-let zoomOn=false, guideOn=true;
+let guideOn=true;
+// Windowing and zoom, PACS-style. The loupe this replaces was covering the anatomy
+// beside the point being placed, which is the one thing you need to see.
+//
+// ZOOM IS NOT A LUXURY HERE. Fit-to-window puts a BUU film at ~436 px wide on a
+// 1600x900 screen, and the consensus tolerance of 0.005 of image width is then 2.2
+// SCREEN PIXELS. No one clicks that accurately, so at fit-to-window the tool itself
+// was setting the floor on inter-reader agreement.
+let gainB=1, gainC=1, zoom=1;
+const clamp=(v,lo,hi)=>Math.min(hi,Math.max(lo,v));
+function showWL(){
+  $('wl').textContent = (zoom>1.01?('zoom '+zoom.toFixed(1)+'x  '):'')
+    + 'B '+Math.round(gainB*100)+'%  C '+Math.round(gainC*100)+'%';
+}
+function resetView(){ gainB=1; gainC=1; zoom=1; showWL(); fit(); draw(); }
 const $=i=>document.getElementById(i);
 // X-Annot-Token, not Authorization: on a private Space the Hub proxy
 // consumes Authorization before the app ever sees it.
@@ -276,10 +293,8 @@ async function boot(){
 }
 async function start(){
   $('gate').hidden=true; $('appui').hidden=false;
-  try{
-    toggleZoom(localStorage.getItem('annot_zoom')==='1');
-    toggleGuide(localStorage.getItem('annot_guide')!=='0');
-  }catch(e){ toggleZoom(false); }
+  try{ toggleGuide(localStorage.getItem('annot_guide')!=='0'); }catch(e){}
+  showWL();
   if(token && !$('who').textContent){
     $('who').textContent='using pasted token';
   }
@@ -321,7 +336,7 @@ async function load(){
     cur=await r.json(); progress(cur.progress);
     const src=(cur.case_id===nextId&&nextImg)?nextImg:null;
     img=new Image();
-    img.onload=()=>{C.width=img.width;C.height=img.height;fit();draw();
+    img.onload=()=>{C.width=img.width;C.height=img.height;zoom=1;showWL();fit();draw();
       msg(cur.case_id+'  slot '+cur.slot+'  ('+Math.round(performance.now()-t0)+' ms)');
       nextId=null;nextImg=null;prefetch();};
     if(src){img.src=src}
@@ -330,22 +345,31 @@ async function load(){
   } finally { busy=false; }
 }
 const C=$('c'), X=C.getContext('2d');
-const LP=$('loupe'), LX=LP.getContext('2d');
 // Fit the film to the space left over, preserving aspect ratio, and leave a strip at
 // the bottom: the Windows taskbar auto-shows at the last few pixels of the screen and
 // eats the pointer before it reaches the caudal anatomy.
-const BOTTOM_GUTTER = 64;
 function fit(){
   if(!img.width) return;
-  const st=$('stage').getBoundingClientRect();
-  const availW=Math.max(80, st.width-24);
-  const availH=Math.max(80, window.innerHeight-st.top-BOTTOM_GUTTER-12);
-  const k=Math.min(availW/img.width, availH/img.height);
+  // Size from the CONTAINER'S OWN content box, never from window.innerHeight minus the
+  // stage's top. The header wraps to a second line as buttons are added, and a canvas
+  // sized against the one-line header hangs 30 px past the gutter and back into the
+  // taskbar. #stage is a grid row, so its box already accounts for whatever the header
+  // is doing -- and the bottom padding IS the gutter.
+  const st=$('stage'), cs=getComputedStyle(st);
+  const availW=Math.max(80, st.clientWidth
+    - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+  const availH=Math.max(80, st.clientHeight
+    - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom));
+  const k=Math.min(availW/img.width, availH/img.height)*zoom;
   C.style.width =(img.width*k)+'px';
   C.style.height=(img.height*k)+'px';
 }
 function draw(){
+  // filter the film only -- the markers must stay full contrast, or a bright window
+  // washes out the very thing you just placed
+  X.filter='brightness('+gainB+') contrast('+gainC+')';
   X.drawImage(img,0,0);
+  X.filter='none';
   pts.forEach((p,i)=>{
     X.strokeStyle=i===0?'#00E5A0':'#FF3B30';   // 1st / 2nd mark, NOT left/rightX.lineWidth=Math.max(1.5,img.width/700);
     const x=p[0]*img.width,y=p[1]*img.height,r=img.width/80;
@@ -354,24 +378,30 @@ function draw(){
     X.moveTo(x,y-r*1.7);X.lineTo(x,y+r*1.7);X.stroke();
   });
 }
-// MAGNIFIER: a femoral head centre is judged by the curvature of a faint arc, and the
-// film is displayed scaled down to fit the screen. Without this the annotator's
-// precision is set by the display scale rather than by the anatomy.
-C.addEventListener('mousemove',e=>{
-  if(!img.width||!zoomOn)return;
-  const r=C.getBoundingClientRect();
-  const fx=(e.clientX-r.left)/r.width, fy=(e.clientY-r.top)/r.height;
-  const sx=fx*img.width, sy=fy*img.height, Z=4, S=190/Z;
-  LX.fillStyle='#000';LX.fillRect(0,0,190,190);
-  LX.drawImage(img, sx-S/2, sy-S/2, S, S, 0,0,190,190);
-  LX.strokeStyle='#0072B2';LX.lineWidth=1;
-  LX.beginPath();LX.moveTo(95,80);LX.lineTo(95,110);LX.moveTo(80,95);LX.lineTo(110,95);
-  LX.stroke();
-  LP.style.display='block';
-  LP.style.left=(e.clientX-r.left+18)+'px';
-  LP.style.top=(e.clientY-r.top-210)+'px';
-});
-C.addEventListener('mouseleave',()=>LP.style.display='none');
+C.addEventListener('wheel',e=>{
+  if(!img.width)return;
+  e.preventDefault();
+  const up = e.deltaY < 0;
+  if(e.ctrlKey){
+    const st=$('stage'), r=C.getBoundingClientRect();
+    const fx=(e.clientX-r.left)/r.width, fy=(e.clientY-r.top)/r.height;
+    const before=zoom;
+    zoom=clamp(zoom*(up?1.15:1/1.15), 1, 10);
+    if(zoom!==before){
+      fit();
+      const r2=C.getBoundingClientRect();
+      // keep the point under the cursor where it was
+      st.scrollLeft += (fx*r2.width  - (e.clientX - r2.left));
+      st.scrollTop  += (fy*r2.height - (e.clientY - r2.top));
+      draw();
+    }
+  } else if(e.shiftKey){
+    gainB=clamp(gainB+(up?0.05:-0.05), 0.2, 3); draw();
+  } else {
+    gainC=clamp(gainC+(up?0.08:-0.08), 0.3, 5); draw();
+  }
+  showWL();
+},{passive:false});
 C.addEventListener('click',e=>{
   if(pts.length>=2||!img.width)return;
   const r=C.getBoundingClientRect();
@@ -379,14 +409,6 @@ C.addEventListener('click',e=>{
 });
 function undo(){pts.pop();draw()}
 
-function toggleZoom(on){
-  zoomOn = (on===undefined) ? !zoomOn : on;
-  document.body.classList.toggle('zoom', zoomOn);
-  $('zoomBtn').classList.toggle('ctl--on', zoomOn);
-  $('zoomBtn').style.borderColor = zoomOn ? '#0072B2' : '';
-  if(!zoomOn) LP.style.display='none';
-  try{localStorage.setItem('annot_zoom', zoomOn?'1':'0')}catch(e){}
-}
 function toggleGuide(on){
   guideOn = (on===undefined) ? !guideOn : on;
   $('split').classList.toggle('noguide', !guideOn);
@@ -444,11 +466,15 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='v')notVisible();
   else if(e.key==='p')pass();
   else if(e.key==='n')load();
-  else if(e.key==='m')toggleZoom();
+  else if(e.key==='r')resetView();
   else if(e.key==='g')toggleGuide();
   else if(e.key==='f')flagIt();
 });
 window.addEventListener('resize', fit);
+// The header wraps as its contents change, which moves #stage without firing a window
+// resize. Sizing the canvas from a stale #stage box left the film hanging past the
+// bottom gutter -- straight back into the taskbar.
+if(window.ResizeObserver) new ResizeObserver(()=>fit()).observe($('stage'));
 boot();
 </script>
 """
@@ -516,7 +542,8 @@ REVIEW = """<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Adjudication</title>
 <style>""" + STYLE + """
- #rsplit{display:grid;grid-template-columns:330px 1fr;height:calc(100vh - var(--hdr))}
+ body{display:flex;flex-direction:column;height:100vh}
+ #rsplit{flex:1 1 auto;display:grid;grid-template-columns:330px 1fr;min-height:0}
  #rlist{overflow-y:auto;border-right:1px solid #2a2a33;background:#15151b}
  .ritem{padding:9px 12px;border-bottom:1px solid #23232b;cursor:pointer;font-size:12.5px}
  .ritem:hover{background:#1d1d26}
@@ -567,9 +594,12 @@ async function loadQueue(){
 // swallow the pointer over the caudal anatomy.
 function fit(){
   if(!img.width)return;
-  const st=$('rstage').getBoundingClientRect();
-  const k=Math.min((st.width-24)/img.width,
-                   (window.innerHeight-st.top-76)/img.height);
+  const st=$('rstage'), cs=getComputedStyle(st);
+  const aw=Math.max(80, st.clientWidth
+    - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+  const ah=Math.max(80, st.clientHeight
+    - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom));
+  const k=Math.min(aw/img.width, ah/img.height);
   C.style.width=(img.width*k)+'px'; C.style.height=(img.height*k)+'px';
 }
 function draw(){
@@ -606,7 +636,7 @@ async function pick(i){
     +(cur.flagged||[]).map(f=>'<span>flagged by '+f.by+(f.note?': '+f.note:'')+'</span>').join('');
   const b=await fetch('/image/'+cur.case_id,{headers:H()});
   img=new Image();
-  img.onload=()=>{C.width=img.width;C.height=img.height;fit();draw();};
+  img.onload=()=>{C.width=img.width;C.height=img.height;zoom=1;showWL();fit();draw();};
   img.src=URL.createObjectURL(await b.blob());
 }
 C.addEventListener('click',e=>{
@@ -643,6 +673,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='u')clearMine();
 });
 window.addEventListener('resize',fit);
+if(window.ResizeObserver) new ResizeObserver(()=>fit()).observe($('rstage'));
 loadQueue();
 </script>
 """

@@ -101,6 +101,14 @@ with sync_playwright() as p:
     canvas = pg.locator("#c").bounding_box()
     print(f"       guide  {guide}")
     print(f"       canvas {canvas}")
+    print("       diag:", pg.evaluate("""(()=>{
+      const st=document.getElementById('stage').getBoundingClientRect();
+      const c=document.getElementById('c');
+      const cs=getComputedStyle(document.getElementById('stage'));
+      return {stageTop:+st.top.toFixed(1), stageH:+st.height.toFixed(1),
+              padBottom:cs.paddingBottom, innerH:window.innerHeight,
+              canvasCssH:c.style.height, imgH:img.height, zoom:zoom};
+    })()"""))
 
     check(guide["x"] < stage["x"], "guide is on the LEFT of the film")
     check(canvas["x"] > guide["x"] + guide["width"] - 2,
@@ -114,22 +122,43 @@ with sync_playwright() as p:
     check(gap >= 50, f"bottom gutter clear of the taskbar ({gap:.0f} px below the film)")
     check(canvas["y"] + canvas["height"] <= VIEW["height"], "film is fully on screen")
 
-    # magnifier must be OFF until asked for
+    # Windowing and zoom replaced the magnifier. Zoom is the one that matters: fit to
+    # window puts a BUU film at ~436 px wide on a 1600x900 screen, so the 0.005
+    # consensus tolerance is 2.2 SCREEN PIXELS and the tool, not the reader, sets the
+    # floor on agreement.
     pg.mouse.move(canvas["x"] + canvas["width"] / 2, canvas["y"] + canvas["height"] / 2)
-    pg.wait_for_timeout(200)
-    check(pg.eval_on_selector("#loupe", "e => getComputedStyle(e).display") == "none",
-          "magnifier is off by default")
-    pg.screenshot(path=str(SHOTS / "1_reading.png"))
-
-    pg.keyboard.press("m")
-    pg.mouse.move(canvas["x"] + canvas["width"] / 2, canvas["y"] + canvas["height"] / 3)
-    pg.wait_for_timeout(250)
-    check(pg.eval_on_selector("#loupe", "e => getComputedStyle(e).display") != "none",
-          "pressing m turns the magnifier on")
-    pg.keyboard.press("m")
+    check(pg.evaluate("typeof gainC") == "number", "windowing state exists")
+    base = pg.evaluate("gainC")
+    pg.mouse.wheel(0, -120)
     pg.wait_for_timeout(150)
-    check(pg.eval_on_selector("#loupe", "e => getComputedStyle(e).display") == "none",
-          "pressing m again turns it off")
+    check(pg.evaluate("gainC") > base,
+          f"scrolling raises contrast ({base} -> {pg.evaluate('gainC')})")
+    pg.keyboard.down("Shift")
+    b0 = pg.evaluate("gainB")
+    pg.mouse.wheel(0, -120)
+    pg.wait_for_timeout(150)
+    pg.keyboard.up("Shift")
+    check(pg.evaluate("gainB") > b0, "shift+scroll raises brightness")
+
+    w0 = pg.locator("#c").bounding_box()["width"]
+    pg.keyboard.down("Control")
+    for _ in range(10):                      # 1.15^10 ~ 4x, a normal working zoom
+        pg.mouse.wheel(0, -120)
+        pg.wait_for_timeout(60)
+    pg.keyboard.up("Control")
+    pg.wait_for_timeout(200)
+    w1 = pg.locator("#c").bounding_box()["width"]
+    check(w1 > w0 * 1.3, f"ctrl+scroll zooms the film ({w0:.0f} -> {w1:.0f} px)")
+    check(0.005 * w1 > 6,
+          f"zoomed in, the tolerance is {0.005 * w1:.1f} screen px -- clickable "
+          f"(it is 2.2 px at fit-to-window)")
+
+    pg.keyboard.press("r")
+    pg.wait_for_timeout(250)
+    check(abs(pg.locator("#c").bounding_box()["width"] - w0) < 3
+          and abs(pg.evaluate("gainC") - 1) < 1e-6,
+          "r resets zoom and windowing")
+    pg.screenshot(path=str(SHOTS / "1_reading.png"))
 
     # Hiding the guide gives the film the whole window. It does NOT necessarily make the
     # film bigger: a lateral is much taller than it is wide, so on a normal monitor the
