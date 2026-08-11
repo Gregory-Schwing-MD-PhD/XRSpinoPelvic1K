@@ -48,12 +48,15 @@ CRITERIA = """
     <li>Mark its <b>centre of curvature</b>, <u>not</u> the brightest spot. Overlap with
         the acetabulum and the opposite head puts the densest shadow <i>medial</i> to the
         true centre &mdash; that error is systematic, not noise.</li>
-    <li><b>Use the controls.</b> <b>Scroll</b> adjusts contrast and
-        <b>shift+scroll</b> brightness, like windowing a PACS study &mdash; a faint
-        subchondral arc usually appears with more contrast. <b>Ctrl+scroll</b> zooms
-        in about the cursor, and <kbd>r</kbd> resets. <b>Please zoom in before you
-        click</b>: at fit-to-window one screen pixel is several pixels of film, and
-        that alone limits how closely two readers can ever agree.</li>
+    <li><b>The controls work like a PACS.</b> <b>Scroll</b> zooms about the cursor,
+        <b>left-drag</b> windows the film (left-right contrast, up-down brightness),
+        <b>right-drag</b> pans, a plain <b>click</b> places the mark and <kbd>r</kbd>
+        resets. A faint subchondral arc usually appears with more contrast.
+        <b>Zoom and pan carry over to the next film</b>, so set them once on the hips
+        and keep going.</li>
+    <li><b>Zoom in before you click.</b> At fit-to-window one screen pixel is several
+        pixels of film &mdash; close enough that the display, rather than your eye,
+        would set the limit on how well two readers can agree.</li>
    </ol>
 
    <p><b>Do not centre on</b> the fovea capitis (the medial notch &mdash; a defect in the
@@ -241,7 +244,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
      style="text-decoration:none;padding:7px 13px;border-radius:6px;
             border:1px solid #3a3a44">Board</a>
   <button class=ghost onclick=toggleGuide()>Guide <kbd>g</kbd></button>
-  <span id=wl title="scroll = contrast · shift+scroll = brightness · ctrl+scroll = zoom · r = reset"></span>
+  <span id=wl title="scroll = zoom · left-drag = window/level · right-drag = pan · click = mark · r = reset. Zoom and pan carry over to the next film."></span>
   <span id=who></span>
   <div class=bar title="cases finalised"><i id=barfill style="width:0"></i></div>
   <span id=msg></span>
@@ -265,12 +268,30 @@ let guideOn=true;
 // SCREEN PIXELS. No one clicks that accurately, so at fit-to-window the tool itself
 // was setting the floor on inter-reader agreement.
 let gainB=1, gainC=1, zoom=1;
+// Zoom AND pan persist across films. Every film in this set is the same view of the same
+// anatomy, so a reader who has zoomed to the hips wants to still be there on the next
+// one -- resetting per film means re-navigating 2000 times. Pan is kept as a FRACTION of
+// the scrollable range, not pixels, so it lands in the same anatomical region on films
+// of different size.
+let panFx=0.5, panFy=0.5;
+function rememberPan(){
+  const st=$('stage');
+  const mx=st.scrollWidth-st.clientWidth, my=st.scrollHeight-st.clientHeight;
+  if(mx>1) panFx=clamp(st.scrollLeft/mx,0,1);
+  if(my>1) panFy=clamp(st.scrollTop/my,0,1);
+}
+function restorePan(){
+  const st=$('stage');
+  st.scrollLeft=panFx*Math.max(0, st.scrollWidth-st.clientWidth);
+  st.scrollTop =panFy*Math.max(0, st.scrollHeight-st.clientHeight);
+}
 const clamp=(v,lo,hi)=>Math.min(hi,Math.max(lo,v));
 function showWL(){
   $('wl').textContent = (zoom>1.01?('zoom '+zoom.toFixed(1)+'x  '):'')
     + 'B '+Math.round(gainB*100)+'%  C '+Math.round(gainC*100)+'%';
 }
-function resetView(){ gainB=1; gainC=1; zoom=1; showWL(); fit(); draw(); }
+function resetView(){ gainB=1; gainC=1; zoom=1; panFx=0.5; panFy=0.5;
+                      showWL(); fit(); draw(); }
 const $=i=>document.getElementById(i);
 // X-Annot-Token, not Authorization: on a private Space the Hub proxy
 // consumes Authorization before the app ever sees it.
@@ -336,7 +357,8 @@ async function load(){
     cur=await r.json(); progress(cur.progress);
     const src=(cur.case_id===nextId&&nextImg)?nextImg:null;
     img=new Image();
-    img.onload=()=>{C.width=img.width;C.height=img.height;zoom=1;showWL();fit();draw();
+    img.onload=()=>{C.width=img.width;C.height=img.height;showWL();fit();draw();
+                  restorePan();
       msg(cur.case_id+'  slot '+cur.slot+'  ('+Math.round(performance.now()-t0)+' ms)');
       nextId=null;nextImg=null;prefetch();};
     if(src){img.src=src}
@@ -378,35 +400,71 @@ function draw(){
     X.moveTo(x,y-r*1.7);X.lineTo(x,y+r*1.7);X.stroke();
   });
 }
+/* PACS mapping:
+     wheel        zoom, about the cursor
+     left drag    window / level  (left-right contrast, up-down brightness)
+     left click   place the mark
+     right drag   pan
+   The left button does double duty, so a press only becomes a window drag once it has
+   moved past DRAG_MIN; below that it is still a click. Without the threshold a slightly
+   shaky hand would re-window the film instead of marking it. */
+function zoomAt(e, inwards){
+  const st=$('stage'), r=C.getBoundingClientRect();
+  const fx=(e.clientX-r.left)/r.width, fy=(e.clientY-r.top)/r.height;
+  const before=zoom;
+  zoom=clamp(zoom*(inwards?1.15:1/1.15), 1, 12);
+  if(zoom===before) return;
+  fit();
+  const r2=C.getBoundingClientRect();      // keep what was under the cursor there
+  st.scrollLeft += (fx*r2.width  - (e.clientX - r2.left));
+  st.scrollTop  += (fy*r2.height - (e.clientY - r2.top));
+  rememberPan(); draw(); showWL();
+}
 C.addEventListener('wheel',e=>{
   if(!img.width)return;
   e.preventDefault();
-  const up = e.deltaY < 0;
-  if(e.ctrlKey){
-    const st=$('stage'), r=C.getBoundingClientRect();
-    const fx=(e.clientX-r.left)/r.width, fy=(e.clientY-r.top)/r.height;
-    const before=zoom;
-    zoom=clamp(zoom*(up?1.15:1/1.15), 1, 10);
-    if(zoom!==before){
-      fit();
-      const r2=C.getBoundingClientRect();
-      // keep the point under the cursor where it was
-      st.scrollLeft += (fx*r2.width  - (e.clientX - r2.left));
-      st.scrollTop  += (fy*r2.height - (e.clientY - r2.top));
-      draw();
-    }
-  } else if(e.shiftKey){
-    gainB=clamp(gainB+(up?0.05:-0.05), 0.2, 3); draw();
-  } else {
-    gainC=clamp(gainC+(up?0.08:-0.08), 0.3, 5); draw();
-  }
-  showWL();
+  zoomAt(e, e.deltaY < 0);
 },{passive:false});
-C.addEventListener('click',e=>{
+
+const DRAG_MIN = 4;
+let drag = null;
+C.addEventListener('pointerdown',e=>{
+  if(!img.width || (e.button !== 0 && e.button !== 2)) return;
+  const st=$('stage');
+  drag={x:e.clientX, y:e.clientY, b:gainB, c:gainC, moved:0, btn:e.button,
+        sl:st.scrollLeft, stp:st.scrollTop};
+  try{ C.setPointerCapture(e.pointerId); }catch(err){}
+});
+C.addEventListener('pointermove',e=>{
+  if(!drag) return;
+  const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+  drag.moved=Math.max(drag.moved, Math.hypot(dx,dy));
+  if(drag.btn === 2){                       // right: pan, image follows the cursor
+    const st=$('stage');
+    st.scrollLeft = drag.sl - dx;
+    st.scrollTop  = drag.stp - dy;
+    rememberPan();
+    return;
+  }
+  if(drag.moved < DRAG_MIN) return;
+  gainC=clamp(drag.c + dx*0.005, 0.3, 5);
+  gainB=clamp(drag.b - dy*0.004, 0.2, 3);
+  showWL(); draw();
+});
+C.addEventListener('pointerup',e=>{
+  const d=drag; drag=null;
+  if(!d) return;
+  try{ C.releasePointerCapture(e.pointerId); }catch(err){}
+  if(d.moved < DRAG_MIN && d.btn === 0) place(e);      // a click, not a drag
+});
+C.addEventListener('pointercancel',()=>{drag=null});
+C.addEventListener('contextmenu',e=>e.preventDefault());   // right-drag is panning
+
+function place(e){
   if(pts.length>=2||!img.width)return;
   const r=C.getBoundingClientRect();
   pts.push([(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]);draw();
-});
+}
 function undo(){pts.pop();draw()}
 
 function toggleGuide(on){
@@ -636,7 +694,8 @@ async function pick(i){
     +(cur.flagged||[]).map(f=>'<span>flagged by '+f.by+(f.note?': '+f.note:'')+'</span>').join('');
   const b=await fetch('/image/'+cur.case_id,{headers:H()});
   img=new Image();
-  img.onload=()=>{C.width=img.width;C.height=img.height;zoom=1;showWL();fit();draw();};
+  img.onload=()=>{C.width=img.width;C.height=img.height;showWL();fit();draw();
+                  restorePan();};
   img.src=URL.createObjectURL(await b.blob());
 }
 C.addEventListener('click',e=>{

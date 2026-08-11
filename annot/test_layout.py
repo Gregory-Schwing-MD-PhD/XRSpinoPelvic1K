@@ -122,41 +122,59 @@ with sync_playwright() as p:
     check(gap >= 50, f"bottom gutter clear of the taskbar ({gap:.0f} px below the film)")
     check(canvas["y"] + canvas["height"] <= VIEW["height"], "film is fully on screen")
 
-    # Windowing and zoom replaced the magnifier. Zoom is the one that matters: fit to
-    # window puts a BUU film at ~436 px wide on a 1600x900 screen, so the 0.005
-    # consensus tolerance is 2.2 SCREEN PIXELS and the tool, not the reader, sets the
-    # floor on agreement.
-    pg.mouse.move(canvas["x"] + canvas["width"] / 2, canvas["y"] + canvas["height"] / 2)
-    check(pg.evaluate("typeof gainC") == "number", "windowing state exists")
-    base = pg.evaluate("gainC")
-    pg.mouse.wheel(0, -120)
-    pg.wait_for_timeout(150)
-    check(pg.evaluate("gainC") > base,
-          f"scrolling raises contrast ({base} -> {pg.evaluate('gainC')})")
-    pg.keyboard.down("Shift")
-    b0 = pg.evaluate("gainB")
-    pg.mouse.wheel(0, -120)
-    pg.wait_for_timeout(150)
-    pg.keyboard.up("Shift")
-    check(pg.evaluate("gainB") > b0, "shift+scroll raises brightness")
-
+    # PACS mapping: wheel zooms, left-drag windows, right-drag pans, click marks.
+    # Zoom is the one that matters -- fit-to-window puts a BUU film at ~436 px wide on a
+    # 1600x900 screen, so the 0.005 consensus tolerance is 2.2 SCREEN PIXELS and the
+    # display, not the reader, sets the floor on agreement.
+    cx = canvas["x"] + canvas["width"] / 2
+    cy = canvas["y"] + canvas["height"] / 2
+    pg.mouse.move(cx, cy)
     w0 = pg.locator("#c").bounding_box()["width"]
-    pg.keyboard.down("Control")
-    for _ in range(10):                      # 1.15^10 ~ 4x, a normal working zoom
+    for _ in range(10):                        # 1.15^10 ~ 4x, a normal working zoom
         pg.mouse.wheel(0, -120)
         pg.wait_for_timeout(60)
-    pg.keyboard.up("Control")
-    pg.wait_for_timeout(200)
     w1 = pg.locator("#c").bounding_box()["width"]
-    check(w1 > w0 * 1.3, f"ctrl+scroll zooms the film ({w0:.0f} -> {w1:.0f} px)")
+    check(w1 > w0 * 1.3, f"scroll zooms, no modifier ({w0:.0f} -> {w1:.0f} px)")
     check(0.005 * w1 > 6,
-          f"zoomed in, the tolerance is {0.005 * w1:.1f} screen px -- clickable "
-          f"(it is 2.2 px at fit-to-window)")
+          f"zoomed, the tolerance is {0.005 * w1:.1f} screen px -- clickable "
+          f"(2.2 px at fit-to-window)")
+
+    # left-drag windows, and must NOT drop a mark
+    n_before = pg.evaluate("pts.length")
+    c0 = pg.evaluate("gainC")
+    pg.mouse.move(cx, cy); pg.mouse.down()
+    pg.mouse.move(cx + 90, cy - 40, steps=8)
+    pg.mouse.up()
+    pg.wait_for_timeout(150)
+    check(pg.evaluate("gainC") > c0,
+          f"left-drag raises contrast ({c0} -> {pg.evaluate('gainC')})")
+    check(pg.evaluate("gainB") > 1, "left-drag upward raises brightness")
+    check(pg.evaluate("pts.length") == n_before,
+          "a windowing drag does NOT place a mark")
+
+    # right-drag pans
+    sl0 = pg.evaluate("document.getElementById('stage').scrollLeft")
+    pg.mouse.move(cx, cy)
+    pg.mouse.down(button="right")
+    pg.mouse.move(cx - 70, cy, steps=6)
+    pg.mouse.up(button="right")
+    pg.wait_for_timeout(150)
+    check(pg.evaluate("document.getElementById('stage').scrollLeft") > sl0,
+          "right-drag pans the film")
+
+    # zoom and pan survive the next film -- the anatomy is in the same place every time
+    z0 = pg.evaluate("zoom")
+    pg.keyboard.press("Enter") if False else None
+    pg.evaluate("load()")
+    pg.wait_for_timeout(1200)
+    check(abs(pg.evaluate("zoom") - z0) < 1e-6,
+          f"zoom persists onto the next film ({pg.evaluate('zoom'):.2f}x)")
+    check(pg.locator("#c").bounding_box()["width"] > w0 * 1.3,
+          "and the next film is actually drawn at that zoom")
 
     pg.keyboard.press("r")
-    pg.wait_for_timeout(250)
-    check(abs(pg.locator("#c").bounding_box()["width"] - w0) < 3
-          and abs(pg.evaluate("gainC") - 1) < 1e-6,
+    pg.wait_for_timeout(300)
+    check(abs(pg.evaluate("zoom") - 1) < 1e-6 and abs(pg.evaluate("gainC") - 1) < 1e-6,
           "r resets zoom and windowing")
     pg.screenshot(path=str(SHOTS / "1_reading.png"))
 
