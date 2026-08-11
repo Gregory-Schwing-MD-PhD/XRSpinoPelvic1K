@@ -45,6 +45,7 @@ for i in range(N_CASES):
         json.dumps({"case_id": cid, "split": "train", "slots": {}}))
 
 import app as A  # noqa: E402
+A_mod = A
 from fastapi.testclient import TestClient  # noqa: E402
 
 fails = []
@@ -166,6 +167,24 @@ with TestClient(A.app) as c:
     check(j["counts"]["needs_adjudication"] == 2, "both disagreements surfaced")
     check(j["agreement"] and j["agreement"]["n"] >= 2, "agreement stats computed")
     check(c.get("/board").status_code == 200, "board page serves")
+
+    print("\n[7b] head marks are unordered")
+    # Two readers marking the SAME pair of heads must agree regardless of the order they
+    # clicked them. A lateral gives no way to click them in a defined order -- the heads
+    # are superimposed along the beam and nothing distinguishes them -- so scoring
+    # first-against-first would turn a coin flip into a disagreement.
+    A1 = {"heads": [[0.40, 0.60], [0.46, 0.62]]}
+    B1 = {"heads": [[0.461, 0.621], [0.401, 0.601]]}      # same points, clicked swapped
+    check(A._agreement(A1, B1) < 0.005,
+          f"swapped click order still agrees ({A._agreement(A1, B1):.4f})")
+    m = A._mean_points(A1, B1)
+    check(len(m["heads"]) == 2 and m["bicoxofemoral"],
+          "consensus pairs them correctly and derives the midpoint")
+    check(abs(m["bicoxofemoral"][0] - 0.4305) < 0.002,
+          f"midpoint is the mean of both heads ({m['bicoxofemoral']})")
+    check(A._agreement({"left": [0.4, 0.6], "right": None},
+                       {"heads": [[0.402, 0.601]]}) < 0.005,
+          "legacy left/right reads still score against the new format")
 
     print("\n[8] durability: the background flush actually writes")
     import time

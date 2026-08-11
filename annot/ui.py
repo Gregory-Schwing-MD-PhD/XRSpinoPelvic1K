@@ -57,11 +57,37 @@ CRITERIA = """
    sphere, centring there pulls you medially), the greater trochanter, the femoral neck
    or head&ndash;neck junction, or the acetabular roof and teardrop.</p>
 
-   <p><b>One circle or two.</b> On a well-positioned lateral the two heads superimpose
-   almost exactly &mdash; mark the single circle as
-   <b class=lft>LEFT</b> and leave <b class=rgt>RIGHT</b> empty. If rotation separates
-   them into two overlapping circles, mark both: the midpoint is derived and their
-   separation is recorded, because a wide separation means an oblique film.</p>
+   <p class=cite><b>You cannot tell left from right on a lateral, and you do not need
+   to.</b> The two heads are superimposed along the beam and nothing in the image
+   distinguishes them. The point we need is the <b>midpoint</b> of the two centres,
+   which is the same whichever way round you mark them. <b>Order does not matter</b>
+   and the two marks are never compared by side.</p>
+
+   <p><b>One circle or two?</b> Most well-positioned laterals show <b>one</b> circle,
+   because the heads superimpose almost exactly &mdash; mark it once and submit. Add a
+   second mark <u>only</u> when you can genuinely resolve <b>two overlapping circles of
+   the same diameter, each with its own concentric subchondral arc</b>. Rotation
+   separates them mostly <i>front-to-back</i>, so two heads sit side by side along the
+   AP direction and are the same size. If your two candidates differ in size, or are
+   stacked well above and below each other, they are almost certainly not two heads.</p>
+
+   <p class=warn><b>If you are not sure it is a second head, mark only one.</b> One
+   confident centre is worth far more to us than two uncertain ones: a single head still
+   gives a usable hip point, whereas a wrong second mark drags the derived midpoint off
+   by half its error.</p>
+
+   <p><b>Things that are NOT the femoral head</b>, and how to tell:</p>
+   <ul>
+    <li><b>Acetabular roof / teardrop</b> &mdash; part of the pelvis. Its arc is
+        <i>concave toward</i> the head (it is the socket) and it runs continuous with the
+        pelvic ring, rather than closing into a circle.</li>
+    <li><b>Greater trochanter</b> &mdash; lateral, not round, and continuous with the
+        femoral shaft rather than seated in a socket.</li>
+    <li><b>Femoral neck / head&ndash;neck junction</b> &mdash; a narrowing, not part of
+        the sphere.</li>
+    <li><b>The outer body-wall convexity</b> &mdash; a soft-tissue edge, low contrast,
+        no cortical arc, and it does not close into a circle.</li>
+   </ul>
 
    <p class=warn><b>&ldquo;Femoral head not visible&rdquo; is a real answer, and it is
    recorded as one.</b> Use it for a prosthesis, heads outside the collimated field, or
@@ -193,7 +219,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <div id=appui hidden>
 <header>
   <button class=go onclick=load()>Next <kbd>n</kbd></button>
-  <span>click <b class=lft>LEFT</b> head, then <b class=rgt>RIGHT</b></span>
+  <span>click the head centre &mdash; a <b class=rgt>2nd</b> only if you see two distinct circles</span>
   <button class=ghost onclick=undo()>Undo <kbd>u</kbd></button>
   <button class=go onclick=send()>Submit <kbd>&crarr;</kbd></button>
   <button class=nv onclick=notVisible()>Not visible <kbd>v</kbd></button>
@@ -314,7 +340,7 @@ function fit(){
 function draw(){
   X.drawImage(img,0,0);
   pts.forEach((p,i)=>{
-    X.strokeStyle=i===0?'#00E5A0':'#FF3B30';X.lineWidth=Math.max(1.5,img.width/700);
+    X.strokeStyle=i===0?'#00E5A0':'#FF3B30';   // 1st / 2nd mark, NOT left/rightX.lineWidth=Math.max(1.5,img.width/700);
     const x=p[0]*img.width,y=p[1]*img.height,r=img.width/80;
     X.beginPath();X.arc(x,y,r,0,7);X.stroke();
     X.beginPath();X.moveTo(x-r*1.7,y);X.lineTo(x+r*1.7,y);
@@ -370,10 +396,10 @@ async function post(url,fields){
 }
 async function send(){
   if(!cur){return}
-  if(!pts.length){msg('mark at least one head, or use Not visible');return}
+  if(!pts.length){msg('mark the head centre, or use Not visible');return}
+  // an unordered list: a lateral cannot tell you which head is which
   const j=await post('/submit',{case_id:cur.case_id,slot:cur.slot,
-    points:JSON.stringify({left:pts[0]||null,right:pts[1]||null,
-                           w:img.width,h:img.height})});
+    points:JSON.stringify({heads:pts,w:img.width,h:img.height})});
   if(j){progress(j.progress);load()}
 }
 async function notVisible(){

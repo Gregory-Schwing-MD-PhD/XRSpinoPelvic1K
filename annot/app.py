@@ -666,7 +666,7 @@ def submit(case_id: str = Form(...), slot: str = Form(...), points: str = Form("
 
         nv = str(not_visible).lower() in ("1", "true", "yes", "on")
         p = json.loads(points) if points else {}
-        if not nv and p.get("left") is None and p.get("right") is None:
+        if not nv and not heads(p):
             raise HTTPException(400, "mark at least one femoral head, or use Not visible")
         if nv:
             s.update(done=True, submitted_at=_now(), points=None,
@@ -821,22 +821,66 @@ def board():
     return BOARD
 
 
+def heads(p: Optional[dict]) -> list:
+    """The marked femoral-head centres, as an UNORDERED list.
+
+    A lateral radiograph cannot tell you which head is left and which is right: the two
+    are superimposed along the beam, and nothing in the image distinguishes them. Asking
+    a reader to label them L and R asked for something unknowable, and comparing reader
+    A's "left" against reader B's "left" would then score a coin flip as disagreement.
+
+    It also does not matter. The bicoxofemoral point is the MIDPOINT of the two centres,
+    which is identical either way round.
+
+    Reads both shapes: {"heads":[[x,y],...]} and the older {"left":.., "right":..}.
+    """
+    if not p:
+        return []
+    if isinstance(p.get("heads"), list):
+        return [q for q in p["heads"] if q]
+    return [q for q in (p.get("left"), p.get("right")) if q]
+
+
 def _agreement(a: dict, b: dict) -> Optional[float]:
+    """Worst distance between two readers, over the BEST pairing of their marks.
+
+    Order-free: with two marks each, both pairings are tried and the better one wins.
+    With unequal counts -- one reader saw two heads, the other one -- only the marks
+    that can be paired are scored, and the extra mark is left to adjudication rather
+    than counted as an error, because "how many circles are there" is a different
+    disagreement from "where is the centre".
+    """
     import math
-    ds = []
-    for k in ("left", "right"):
-        if a.get(k) and b.get(k):
-            ds.append(math.hypot(a[k][0] - b[k][0], a[k][1] - b[k][1]))
-    return max(ds) if ds else None
+    A, B = heads(a), heads(b)
+    if not A or not B:
+        return None
+    d = lambda u, v: math.hypot(u[0] - v[0], u[1] - v[1])   # noqa: E731
+    if len(A) == 2 and len(B) == 2:
+        return min(max(d(A[0], B[0]), d(A[1], B[1])),
+                   max(d(A[0], B[1]), d(A[1], B[0])))
+    return min(d(u, v) for u in A for v in B)
 
 
 def _mean_points(a: dict, b: dict) -> dict:
-    out = {}
-    for k in ("left", "right"):
-        if a.get(k) and b.get(k):
-            out[k] = [(a[k][0] + b[k][0]) / 2, (a[k][1] + b[k][1]) / 2]
-        else:
-            out[k] = a.get(k) or b.get(k)
+    """Consensus marks, paired the same order-free way, plus the derived midpoint --
+    which is the quantity PI actually needs."""
+    import math
+    A, B = heads(a), heads(b)
+    d = lambda u, v: math.hypot(u[0] - v[0], u[1] - v[1])   # noqa: E731
+    mid = lambda u, v: [(u[0] + v[0]) / 2, (u[1] + v[1]) / 2]   # noqa: E731
+    if len(A) == 2 and len(B) == 2:
+        if (max(d(A[0], B[1]), d(A[1], B[0]))
+                < max(d(A[0], B[0]), d(A[1], B[1]))):
+            B = [B[1], B[0]]
+        hs = [mid(A[0], B[0]), mid(A[1], B[1])]
+    else:
+        pair = min(((u, v) for u in A for v in B), key=lambda t: d(*t))
+        hs = [mid(*pair)]
+    bicox = ([sum(h[0] for h in hs) / len(hs), sum(h[1] for h in hs) / len(hs)]
+             if hs else None)
+    out = {"heads": hs, "bicoxofemoral": bicox}
+    if len(hs) == 2:
+        out["separation"] = d(hs[0], hs[1])   # a wide one means an oblique film
     return out
 
 
