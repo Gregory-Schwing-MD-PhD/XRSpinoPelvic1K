@@ -423,8 +423,10 @@ async function notVisible(){
 // read: flag it, then answer it as best you can, or use Not visible.
 async function flagIt(){
   if(!cur)return;
-  const note=prompt('What is unclear about this film?
-'
+  // \\n, not a real line break: this file is a Python string, so a bare \\n here becomes
+  // an actual newline inside a JS single-quoted literal -- a SyntaxError that takes the
+  // whole script down and leaves the reader a blank page.
+  const note=prompt('What is unclear about this film?\\n'
     +'(it goes to the adjudication queue with your name)','');
   if(note===null)return;
   await post('/flag',{case_id:cur.case_id,note:note});

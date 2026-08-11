@@ -65,11 +65,36 @@ VIEW = {"width": 1600, "height": 900}
 with sync_playwright() as p:
     br = p.chromium.launch(headless="--headed" not in sys.argv)
     pg = br.new_page(viewport=VIEW)
+    # ANY uncaught JS error is fatal here. Both #gate and #appui start hidden and boot()
+    # reveals one, so a single SyntaxError anywhere in the script leaves the reader a
+    # blank page with nothing in the UI to hint at why. That shipped once, from a bare
+    # newline inside a JS string literal -- this file is a Python string, so the escape
+    # has to survive two layers.
+    errs = []
+    pg.on("pageerror", lambda e: errs.append(str(e)))
+    pg.on("console", lambda m: errs.append(f"console.error: {m.text}")
+          if m.type == "error" else None)
     pg.goto(f"http://127.0.0.1:{PORT}/", wait_until="networkidle")
     pg.evaluate("localStorage.setItem('hf_tok','alice')")
     pg.reload(wait_until="networkidle")
     pg.wait_for_function("document.getElementById('c').width > 0", timeout=20000)
     pg.wait_for_timeout(400)
+
+    check(not errs, f"no JS errors on the reading page ({errs[:2]})")
+    check(pg.eval_on_selector("#appui", "e => !e.hidden"),
+          "the app actually became visible (not a blank page)")
+
+    # the adjudication page is a second script and fails the same way
+    rerrs = []
+    pg2 = br.new_page(viewport=VIEW)
+    pg2.on("pageerror", lambda e: rerrs.append(str(e)))
+    pg2.on("console", lambda m: rerrs.append(f"console.error: {m.text}")
+           if m.type == "error" else None)
+    pg2.goto(f"http://127.0.0.1:{PORT}/review", wait_until="networkidle")
+    pg2.wait_for_timeout(600)
+    syntax = [e for e in rerrs if "SyntaxError" in e or "Unexpected" in e]
+    check(not syntax, f"no JS syntax errors on /review ({syntax[:1]})")
+    pg2.close()
 
     guide = pg.locator("#guide").bounding_box()
     stage = pg.locator("#stage").bounding_box()
