@@ -69,13 +69,24 @@ CRITERIA = """
    which is the same whichever way round you mark them. <b>Order does not matter</b>
    and the two marks are never compared by side.</p>
 
-   <p><b>One circle or two?</b> Most well-positioned laterals show <b>one</b> circle,
-   because the heads superimpose almost exactly &mdash; mark it once and submit. Add a
-   second mark <u>only</u> when you can genuinely resolve <b>two overlapping circles of
-   the same diameter, each with its own concentric subchondral arc</b>. Rotation
-   separates them mostly <i>front-to-back</i>, so two heads sit side by side along the
-   AP direction and are the same size. If your two candidates differ in size, or are
-   stacked well above and below each other, they are almost certainly not two heads.</p>
+   <p><b>One circle or two?</b> Three cases, and only the third is a judgement call:</p>
+   <ul>
+    <li><b>You see one circle</b> &mdash; the usual well-positioned lateral, where the
+        heads superimpose. <b>One mark.</b> It already sits at the midpoint.</li>
+    <li><b>You can clearly resolve two</b>, each with its own concentric subchondral arc.
+        <b>Mark BOTH.</b> Do not pick one. The point we derive is the midpoint, so
+        marking a single head on a film where the heads are separated by
+        <i>S</i> puts that point <b><i>S</i>/2 away from the truth</b> &mdash; on a
+        rotated film that is far larger than the agreement tolerance. Two marks is the
+        <i>correct</i> answer here, not the ambitious one.</li>
+    <li><b>You can see one clearly and suspect a second</b> without being able to trace
+        its arc. Mark the one you are sure of and press <kbd>f</kbd> to flag it. That is
+        the only case where one mark is the cautious choice.</li>
+   </ul>
+   <p>Rotation separates the heads mostly <i>front-to-back</i>, so two real heads sit
+   side by side along the AP direction and are <b>the same diameter</b>. Candidates that
+   differ in size, or are stacked well above and below one another, are almost certainly
+   not two heads.</p>
 
    <p class=cite><b>Unsure about a film?</b> Press <kbd>f</kbd> to <b>Flag</b> it with a
    note. It goes straight to the adjudication queue with your name on it and we will look
@@ -83,10 +94,12 @@ CRITERIA = """
    raise one. Flagging does not use up your read: answer the film as best you can
    afterwards, or mark it not visible.</p>
 
-   <p class=warn><b>If you are not sure it is a second head, mark only one.</b> One
-   confident centre is worth far more to us than two uncertain ones: a single head still
-   gives a usable hip point, whereas a wrong second mark drags the derived midpoint off
-   by half its error.</p>
+   <p class=warn><b>&ldquo;Mark only one when unsure&rdquo; means unsure that a second
+   head is there</b> &mdash; not unsure which of two visible circles to choose. If you
+   can see two, mark two. Both errors halve into the midpoint: a wrong second mark that
+   is off by <i>E</i> costs <i>E</i>/2, and a missing second head costs <i>S</i>/2, where
+   <i>S</i> is the separation. On a rotated film the missing head is usually the bigger
+   error of the two.</p>
 
    <p><b>Things that are NOT the femoral head</b>, and how to tell:</p>
    <ul>
