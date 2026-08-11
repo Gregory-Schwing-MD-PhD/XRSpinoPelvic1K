@@ -87,7 +87,9 @@ def main():
     dA.line([ax - r * 2.2, ay - r * 2.2, ax - r * 0.8, ay - r * 0.8], fill=GREEN, width=2)
     label(dA, (ax - r * 2.3, ay - r * 2.3), "femoral head", GREEN, 18, "ls")
     label(dA, (10, 10), "A  where to look", WHITE, 18)
-    label(dA, (10, 590), "below and anterior to the S1 endplate,\nseated in the acetabulum",
+    # 548, not 590: two 14 px lines need ~36 px and the panel is 620 tall, so anything
+    # below ~560 loses the second line off the bottom edge.
+    label(dA, (10, 548), "below and anterior to the S1 endplate,\nseated in the acetabulum",
           (200, 210, 220), 14)
 
     # ── panel B: zoomed, with the concentric-circle construction ──────────────
@@ -116,12 +118,39 @@ def main():
           "then mark its centre of curvature\n"
           "— NOT the brightest shadow", (200, 210, 220), 14)
 
+    # ── panel C: the two-head case, which our own data cannot show ────────────
+    # A DRR is integrated ALONG the bicoxofemoral axis, so the two heads superimpose
+    # exactly and this case is unreachable from our CT. A real film separates them
+    # because the beam is not quite along that axis. The second circle here is therefore
+    # SYNTHETIC and labelled as such -- drawn at the same radius, offset front-to-back,
+    # which is the geometry that distinguishes two heads from a head plus a lookalike.
+    Cp = crop.resize((round(crop.width * Z), 620), Image.LANCZOS)
+    dC = ImageDraw.Draw(Cp)
+    sep = rz * 0.95                      # a plausible separation on a rotated film
+    c1 = (cx - sep / 2, cy)
+    c2 = (cx + sep / 2, cy - rz * 0.10)  # rotation offsets mostly front-to-back
+    for c in (c1, c2):
+        dC.ellipse([c[0] - rz, c[1] - rz, c[0] + rz, c[1] + rz], outline=BLUE, width=3)
+        dC.line([c[0] - 22, c[1], c[0] + 22, c[1]], fill=AMBER, width=3)
+        dC.line([c[0], c[1] - 22, c[0], c[1] + 22], fill=AMBER, width=3)
+    mid = ((c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2)
+    dC.line([c1[0], c1[1], c2[0], c2[1]], fill=GREEN, width=3)
+    dC.ellipse([mid[0] - 7, mid[1] - 7, mid[0] + 7, mid[1] + 7], fill=GREEN)
+    label(dC, (10, 10), "C  two heads: mark BOTH", WHITE, 18)
+    label(dC, (mid[0], mid[1] + 44), "midpoint — derived for you", GREEN, 15, "ms")
+    label(dC, (10, 528),
+          "on a rotated film the heads separate\n"
+          "front-to-back, SAME diameter.\n"
+          "schematic: second head drawn in",
+          (200, 210, 220), 14)
+
     # ── join ──────────────────────────────────────────────────────────────────
     gap = 12
-    W = A.width + gap + B.width
+    W = A.width + gap + B.width + gap + Cp.width
     fig = Image.new("RGB", (W, 620), (12, 12, 16))
     fig.paste(A, (0, 0))
     fig.paste(B, (A.width + gap, 0))
+    fig.paste(Cp, (A.width + gap + B.width + gap, 0))
     fig.save(OUT, optimize=True)
     print(f"wrote {OUT}  ({fig.width}x{fig.height}, {OUT.stat().st_size/1000:.0f} kB)")
 
