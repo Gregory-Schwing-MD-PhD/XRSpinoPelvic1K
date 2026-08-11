@@ -186,6 +186,39 @@ with TestClient(A.app) as c:
                        {"heads": [[0.402, 0.601]]}) < 0.005,
           "legacy left/right reads still score against the new format")
 
+    print("\n[7c] flag and adjudicate")
+    # Readers cannot browse, re-open or export a film, so a flag is the ONLY way they can
+    # raise one -- and an adjudicator needs to see both reads without anyone sending
+    # anything. Both were missing entirely.
+    r = c.post("/flag", headers=hdr("alice"),
+               data={"case_id": "case002", "note": "is that the acetabulum?"})
+    check(r.status_code == 200 and A._INDEX["case002"].get("flagged"),
+          "a reader can flag the film they are on")
+    check(c.get("/queue", headers=hdr("alice")).status_code == 403,
+          "the queue is closed to ordinary readers")
+    q = c.get("/queue", headers=hdr("chief"))
+    check(q.status_code == 200, "an adjudicator can open the queue")
+    ids = [x["case_id"] for x in q.json()["cases"]]
+    check("case002" in ids and "case003" in ids,
+          f"queue carries disagreements AND flagged films ({ids})")
+    got = next(x for x in q.json()["cases"] if x["case_id"] == "case002")
+    check(len(got["reads"]) == 2 and all("heads" in rd for rd in got["reads"]),
+          "the queue hands over both readers' actual marks")
+    r = c.post("/adjudicate", headers=hdr("chief"),
+               data={"case_id": "case002",
+                     "points": json.dumps({"heads": [[0.55, 0.61]]}),
+                     "note": "head is the smaller anterior circle"})
+    check(r.status_code == 200, "adjudicator can settle a case")
+    fin = A._INDEX["case002"].get("final") or {}
+    check(fin.get("by") == "adjudicated" and fin.get("adjudicator") == "chief",
+          "settled case records who decided it")
+    check(not A._INDEX["case002"].get("disagree"), "settling clears the disagreement")
+    check(c.post("/adjudicate", headers=hdr("alice"),
+                 data={"case_id": "case003", "not_visible": "1"}).status_code == 403,
+          "an ordinary reader cannot adjudicate")
+    check(c.get("/review", headers=hdr("chief")).status_code == 200,
+          "adjudication page serves")
+
     print("\n[8] durability: the background flush actually writes")
     import time
     time.sleep(1.0)

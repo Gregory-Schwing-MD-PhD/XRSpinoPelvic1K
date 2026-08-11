@@ -71,6 +71,12 @@ CRITERIA = """
    AP direction and are the same size. If your two candidates differ in size, or are
    stacked well above and below each other, they are almost certainly not two heads.</p>
 
+   <p class=cite><b>Unsure about a film?</b> Press <kbd>f</kbd> to <b>Flag</b> it with a
+   note. It goes straight to the adjudication queue with your name on it and we will look
+   at it together &mdash; you cannot send films out of this tool, so this is the way to
+   raise one. Flagging does not use up your read: answer the film as best you can
+   afterwards, or mark it not visible.</p>
+
    <p class=warn><b>If you are not sure it is a second head, mark only one.</b> One
    confident centre is worth far more to us than two uncertain ones: a single head still
    gives a usable hip point, whereas a wrong second mark drags the derived midpoint off
@@ -224,6 +230,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
   <button class=go onclick=send()>Submit <kbd>&crarr;</kbd></button>
   <button class=nv onclick=notVisible()>Not visible <kbd>v</kbd></button>
   <button class=sk onclick=pass()>Pass <kbd>p</kbd></button>
+  <button class=ghost onclick=flagIt()>Flag <kbd>f</kbd></button>
   <a href="/board" target="_blank" class=ghost
      style="text-decoration:none;padding:7px 13px;border-radius:6px;
             border:1px solid #3a3a44">Board</a>
@@ -411,6 +418,18 @@ async function notVisible(){
                                 not_visible:'1',reason:why});
   if(j){progress(j.progress);load()}
 }
+// A reader sees one film at a time and cannot browse, re-open or export -- so without
+// this there is no way to raise a film they are unsure about. It does not consume the
+// read: flag it, then answer it as best you can, or use Not visible.
+async function flagIt(){
+  if(!cur)return;
+  const note=prompt('What is unclear about this film?
+'
+    +'(it goes to the adjudication queue with your name)','');
+  if(note===null)return;
+  await post('/flag',{case_id:cur.case_id,note:note});
+  msg('flagged for discussion — now answer it as best you can');
+}
 async function pass(){
   if(!cur)return;
   await post('/skip',{case_id:cur.case_id,slot:cur.slot,reason:'passed'});
@@ -425,6 +444,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='n')load();
   else if(e.key==='m')toggleZoom();
   else if(e.key==='g')toggleGuide();
+  else if(e.key==='f')flagIt();
 });
 window.addEventListener('resize', fit);
 boot();
@@ -486,5 +506,141 @@ async function tick(){
     +'  ·  refreshed '+new Date().toLocaleTimeString();
 }
 tick(); setInterval(tick,10000);
+</script>
+"""
+
+
+REVIEW = """<!doctype html><html lang=en><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Adjudication</title>
+<style>""" + STYLE + """
+ #rsplit{display:grid;grid-template-columns:330px 1fr;height:calc(100vh - var(--hdr))}
+ #rlist{overflow-y:auto;border-right:1px solid #2a2a33;background:#15151b}
+ .ritem{padding:9px 12px;border-bottom:1px solid #23232b;cursor:pointer;font-size:12.5px}
+ .ritem:hover{background:#1d1d26}
+ .ritem.is-on{background:#1f2a3a;box-shadow:inset 3px 0 0 var(--go)}
+ .ritem b{font-family:var(--mono)}
+ .ritem span{display:block;color:#8a94a0;margin-top:2px}
+ .ritem.done b{color:#6b7684;text-decoration:line-through}
+ #rstage{display:flex;align-items:center;justify-content:center;overflow:auto;
+         padding:10px 12px 64px;min-width:0}
+ .legend{display:flex;gap:14px;font-size:12px;margin-left:8px}
+ .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+</style>
+<header>
+  <b>Adjudication</b>
+  <span id=legend class=legend></span>
+  <button class=go onclick=useMine()>Use my mark <kbd>&crarr;</kbd></button>
+  <button class=ghost onclick=useReader(0)>Accept 1st reader <kbd>1</kbd></button>
+  <button class=ghost onclick=useReader(1)>Accept 2nd reader <kbd>2</kbd></button>
+  <button class=nv onclick=settleNV()>Not visible <kbd>v</kbd></button>
+  <button class=ghost onclick=clearMine()>Clear <kbd>u</kbd></button>
+  <a href="/" class=ghost style="text-decoration:none;padding:7px 13px;
+     border-radius:6px;border:1px solid #3a3a44">Reading</a>
+  <span id=msg></span>
+</header>
+<div id=rsplit>
+  <div id=rlist></div>
+  <section id=rstage><div id=rwrap><canvas id=rc></canvas></div></section>
+</div>
+<script>
+const $=i=>document.getElementById(i);
+const H=()=>{const t=localStorage.getItem('hf_tok');return t?{'X-Annot-Token':t}:{}};
+const msg=t=>$('msg').textContent=t;
+const COL=['#00E5A0','#FF3B30'];
+let cases=[], cur=null, img=new Image(), mine=[];
+const C=$('rc'), X=C.getContext('2d');
+
+async function loadQueue(){
+  const r=await fetch('/queue',{headers:H()});
+  if(!r.ok){msg(await r.text());return}
+  cases=(await r.json()).cases;
+  $('rlist').innerHTML=cases.map((c,i)=>
+    '<div class="ritem'+(c.settled?' done':'')+'" data-i="'+i+'" onclick="pick('+i+')">'
+    +'<b>'+c.case_id+'</b><span>'+c.why+'</span></div>').join('')
+    || '<div class=ritem><span>nothing to adjudicate</span></div>';
+  if(cases.length) pick(0);
+}
+// Fit like the reading page: leave a strip at the bottom so the taskbar cannot
+// swallow the pointer over the caudal anatomy.
+function fit(){
+  if(!img.width)return;
+  const st=$('rstage').getBoundingClientRect();
+  const k=Math.min((st.width-24)/img.width,
+                   (window.innerHeight-st.top-76)/img.height);
+  C.style.width=(img.width*k)+'px'; C.style.height=(img.height*k)+'px';
+}
+function draw(){
+  if(!img.width)return;
+  X.drawImage(img,0,0);
+  const r=img.width/85, lw=Math.max(2,img.width/450);
+  (cur.reads||[]).forEach((rd,i)=>{
+    X.strokeStyle=COL[i]; X.lineWidth=lw;
+    (rd.heads||[]).forEach(p=>{
+      const x=p[0]*img.width,y=p[1]*img.height;
+      X.beginPath();X.arc(x,y,r,0,7);X.stroke();
+      X.beginPath();X.moveTo(x-r*1.7,y);X.lineTo(x+r*1.7,y);
+      X.moveTo(x,y-r*1.7);X.lineTo(x,y+r*1.7);X.stroke();
+    });
+  });
+  X.strokeStyle='#ffffff'; X.lineWidth=lw*1.2;
+  mine.forEach(p=>{
+    const x=p[0]*img.width,y=p[1]*img.height;
+    X.beginPath();X.arc(x,y,r*1.25,0,7);X.stroke();
+    X.beginPath();X.moveTo(x-r*2,y);X.lineTo(x+r*2,y);
+    X.moveTo(x,y-r*2);X.lineTo(x,y+r*2);X.stroke();
+  });
+}
+async function pick(i){
+  cur=cases[i]; mine=[];
+  [...document.querySelectorAll('.ritem')].forEach(e=>
+    e.classList.toggle('is-on', e.dataset.i==String(i)));
+  $('legend').innerHTML=(cur.reads||[]).map((rd,k)=>
+    '<span><i style="background:'+COL[k]+'"></i>'+rd.annotator
+    +(rd.not_visible?' — not visible'+(rd.reason?' ('+rd.reason+')':''):
+      ' — '+(rd.heads||[]).length+' mark(s)')+'</span>').join('')
+    +'<span><i style="background:#fff"></i>your mark</span>'
+    +(cur.agree!=null?'<span>readers differ by '+(100*cur.agree).toFixed(2)+'% of width</span>':'')
+    +(cur.flagged||[]).map(f=>'<span>flagged by '+f.by+(f.note?': '+f.note:'')+'</span>').join('');
+  const b=await fetch('/image/'+cur.case_id,{headers:H()});
+  img=new Image();
+  img.onload=()=>{C.width=img.width;C.height=img.height;fit();draw();};
+  img.src=URL.createObjectURL(await b.blob());
+}
+C.addEventListener('click',e=>{
+  if(mine.length>=2)return;
+  const r=C.getBoundingClientRect();
+  mine.push([(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]); draw();
+});
+function clearMine(){mine=[];draw()}
+async function settle(body){
+  const f=new FormData(); f.append('case_id',cur.case_id);
+  for(const k in body) f.append(k,body[k]);
+  const r=await fetch('/adjudicate',{method:'POST',headers:H(),body:f});
+  if(!r.ok){msg(await r.text());return}
+  msg(cur.case_id+' settled');
+  const i=cases.indexOf(cur); cases[i].settled=true;
+  document.querySelector('.ritem[data-i="'+i+'"]').classList.add('done');
+  if(cases[i+1]) pick(i+1);
+}
+function useMine(){
+  if(!mine.length){msg('click the centre first');return}
+  settle({points:JSON.stringify({heads:mine})});
+}
+function useReader(k){
+  const rd=(cur.reads||[])[k];
+  if(!rd){msg('no such read');return}
+  if(rd.not_visible) return settle({not_visible:'1',note:'accepted '+rd.annotator});
+  settle({points:JSON.stringify({heads:rd.heads}),note:'accepted '+rd.annotator});
+}
+function settleNV(){settle({not_visible:'1'})}
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='Enter')useMine(); else if(e.key==='1')useReader(0);
+  else if(e.key==='2')useReader(1); else if(e.key==='v')settleNV();
+  else if(e.key==='u')clearMine();
+});
+window.addEventListener('resize',fit);
+loadQueue();
 </script>
 """

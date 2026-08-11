@@ -816,6 +816,96 @@ def stats(u: dict = Depends(user)):
             "you": u["id"], "pending_writes": len(_DIRTY)}
 
 
+# ── flag + adjudicate ───────────────────────────────────────────────────────────
+# A reader sees exactly one film at a time, streamed through the Space, with no browse,
+# no re-open and no export. That is deliberate -- they never need access to the image
+# repo -- but it also means a reader who is unsure about a film has no way to raise it,
+# and an adjudicator has no way to look at what two readers actually did. Telling people
+# to "send me the ones you are unsure about" asked for something the tool cannot do.
+
+@app.post("/flag")
+def flag(case_id: str = Form(...), note: str = Form(""), u: dict = Depends(user)):
+    """Raise the CURRENT film for discussion without abandoning the read."""
+    _wait_ready()
+    with _LOCK:
+        case = _INDEX.get(case_id)
+        if case is None:
+            raise HTTPException(404, "unknown case")
+        case.setdefault("flagged", []).append(
+            {"by": u["id"], "note": note[:400], "at": _now()})
+        _touch(case)
+    return {"ok": True}
+
+
+def _adjudicator(u: dict = Depends(user)) -> dict:
+    if u["role"] != "adjudicator":
+        raise HTTPException(403, "adjudication is limited to the study leads")
+    return u
+
+
+@app.get("/queue")
+def queue(u: dict = Depends(_adjudicator)):
+    """Everything a human needs to look at: disagreements first, then flagged films."""
+    _wait_ready()
+    with _LOCK:
+        out = []
+        for cid in _ORDER:
+            c = _INDEX.get(cid) or {}
+            if not c.get("disagree") and not c.get("flagged"):
+                continue
+            out.append({
+                "case_id": cid,
+                "why": c.get("disagree") or "flagged by a reader",
+                "flagged": c.get("flagged") or [],
+                "agree": c.get("agree"),
+                "settled": bool(c.get("final")),
+                "reads": [{"annotator": s.get("annotator"),
+                           "not_visible": bool(s.get("not_visible")),
+                           "reason": s.get("reason", ""),
+                           "heads": heads(s.get("points"))}
+                          for k in ("1", "2")
+                          for s in [c.get("slots", {}).get(k)]
+                          if s and s.get("done")],
+            })
+    return {"n": len(out), "cases": out}
+
+
+@app.post("/adjudicate")
+def adjudicate(case_id: str = Form(...), points: str = Form(""),
+               not_visible: str = Form(""), note: str = Form(""),
+               u: dict = Depends(_adjudicator)):
+    """Settle a case. The adjudicator's own marks win outright -- this is the point at
+    which a human has looked at the film and both reads, which no averaging can
+    substitute for."""
+    _wait_ready()
+    with _LOCK:
+        case = _INDEX.get(case_id)
+        if case is None:
+            raise HTTPException(404, "unknown case")
+        nv = str(not_visible).lower() in ("1", "true", "yes", "on")
+        p = json.loads(points) if points else {}
+        if not nv and not heads(p):
+            raise HTTPException(400, "mark a centre, or settle it as not visible")
+        hs = heads(p)
+        case["final"] = {
+            "points": None if nv else {
+                "heads": hs,
+                "bicoxofemoral": [sum(h[0] for h in hs) / len(hs),
+                                  sum(h[1] for h in hs) / len(hs)],
+            },
+            "by": "adjudicated", "adjudicator": u["id"], "note": note[:400],
+            "not_visible": nv,
+        }
+        case.pop("disagree", None)
+        _touch(case)
+    return {"ok": True, "progress": _progress()}
+
+
+@app.get("/review", response_class=HTMLResponse)
+def review():
+    return REVIEW
+
+
 @app.get("/board", response_class=HTMLResponse)
 def board():
     return BOARD
@@ -884,4 +974,4 @@ def _mean_points(a: dict, b: dict) -> dict:
     return out
 
 
-from ui import BOARD, PAGE  # noqa: E402  (markup lives next door)
+from ui import BOARD, PAGE, REVIEW  # noqa: E402  (markup lives next door)
