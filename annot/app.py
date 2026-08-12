@@ -927,6 +927,9 @@ def heads(p: Optional[dict]) -> list:
     if not p:
         return []
     if isinstance(p.get("heads"), list):
+        # radii travel in p["radii"] alongside; they are a per-film scale reference
+        # (an adult head is ~44-50 mm across) and a disagreement in radius between two
+        # readers flags an arc that was ambiguous rather than a centre that was wrong.
         return [q for q in p["heads"] if q]
     return [q for q in (p.get("left"), p.get("right")) if q]
 

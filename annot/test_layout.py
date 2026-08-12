@@ -140,7 +140,7 @@ with sync_playwright() as p:
           f"(2.2 px at fit-to-window)")
 
     # left-drag windows, and must NOT drop a mark
-    n_before = pg.evaluate("pts.length")
+    n_before = pg.evaluate("circles.length")
     c0 = pg.evaluate("gainC")
     pg.mouse.move(cx, cy); pg.mouse.down()
     pg.mouse.move(cx + 90, cy - 40, steps=8)
@@ -149,8 +149,8 @@ with sync_playwright() as p:
     check(pg.evaluate("gainC") > c0,
           f"left-drag raises contrast ({c0} -> {pg.evaluate('gainC')})")
     check(pg.evaluate("gainB") > 1, "left-drag upward raises brightness")
-    check(pg.evaluate("pts.length") == n_before,
-          "a windowing drag does NOT place a mark")
+    check(pg.evaluate("circles.length") == n_before,
+          "a windowing drag on bare film does NOT drop a circle")
 
     # right-drag pans
     sl0 = pg.evaluate("document.getElementById('stage').scrollLeft")
@@ -196,13 +196,48 @@ with sync_playwright() as p:
     pg.keyboard.press("g")
     pg.wait_for_timeout(250)
 
-    # a click must land where it was aimed, in normalised coords
-    pg.mouse.click(canvas["x"] + canvas["width"] * 0.5,
-                   canvas["y"] + canvas["height"] * 0.25)
+    # a click drops a CIRCLE where it was aimed, in normalised coords
+    box = pg.locator("#c").bounding_box()
+    tx = box["x"] + box["width"] * 0.5
+    ty = box["y"] + box["height"] * 0.25
+    pg.mouse.click(tx, ty)
     pg.wait_for_timeout(150)
-    pt = pg.evaluate("pts[0]")
-    check(pt and abs(pt[0] - 0.5) < 0.02 and abs(pt[1] - 0.25) < 0.02,
-          f"click maps to the right spot on the film ({pt})")
+    c0 = pg.evaluate("circles[0]")
+    check(c0 and abs(c0[0] - 0.5) < 0.02 and abs(c0[1] - 0.25) < 0.02,
+          f"click drops a circle where aimed ({c0})")
+    check(c0 and c0[2] > 0, f"the circle has a radius ({c0[2] if c0 else None})")
+
+    # hovering it and scrolling resizes THAT circle, and must not zoom the film
+    r0 = pg.evaluate("circles[0][2]")
+    w_before = pg.locator("#c").bounding_box()["width"]
+    pg.mouse.move(tx, ty)
+    pg.mouse.wheel(0, -120)
+    pg.wait_for_timeout(150)
+    check(pg.evaluate("circles[0][2]") > r0,
+          f"scrolling over a circle grows it ({r0:.4f} -> {pg.evaluate('circles[0][2]'):.4f})")
+    check(abs(pg.locator("#c").bounding_box()["width"] - w_before) < 2,
+          "and does NOT zoom the film")
+
+    # dragging it nudges the circle rather than windowing
+    cbefore = pg.evaluate("circles[0].slice()")
+    gbefore = pg.evaluate("gainC")
+    pg.mouse.move(tx, ty); pg.mouse.down()
+    pg.mouse.move(tx + 30, ty + 10, steps=6); pg.mouse.up()
+    pg.wait_for_timeout(150)
+    cafter = pg.evaluate("circles[0]")
+    check(cafter[0] > cbefore[0], "dragging a circle moves it")
+    check(abs(pg.evaluate("gainC") - gbefore) < 1e-9,
+          "dragging a circle does NOT window the film")
+
+    # the radius carries to the second circle
+    pg.mouse.click(box["x"] + box["width"] * 0.7, box["y"] + box["height"] * 0.3)
+    pg.wait_for_timeout(150)
+    check(pg.evaluate("circles.length") == 2, "a second circle can be placed")
+    check(abs(pg.evaluate("circles[1][2]") - pg.evaluate("circles[0][2]")) < 1e-6,
+          "the second circle inherits the sized radius")
+    check(pg.evaluate("circles.length") == 2 and
+          pg.evaluate("(()=>{const b=document.getElementById('c');return b.width>0})()"),
+          "two circles is the maximum")
     pg.screenshot(path=str(SHOTS / "3_marked.png"))
     br.close()
 

@@ -23,10 +23,16 @@ CRITERIA = """
 <aside id=guide>
  <div class=helpbody>
   <div class=helptext>
-   <p><b>What you are marking.</b> The <b>centre of the femoral head</b>. The head is
-   very nearly a sphere, so on any radiograph its projection is a circle and the target
-   is <b>the centre of that circle</b> &mdash; a geometric centre, not a surface point
-   and not a palpable landmark.</p>
+   <p><b>What you are doing.</b> <b>Fit a circle to the femoral head.</b> Click to drop
+   one, hover it and <b>scroll</b> to size it to the subchondral arc, drag to nudge it.
+   We take its <b>centre</b> &mdash; you never have to judge where the middle is.</p>
+
+   <p class=cite><b>Why a circle rather than a dot.</b> The head is very nearly a sphere,
+   so its projection is a circle, and matching that circle constrains the centre with the
+   <i>whole arc</i> instead of one judgement. It is also the published landmark rather
+   than an approximation of it: Legaye defines the hip axis through the head
+   <i>centres</i>, treating the head as a sphere. This is the Mose concentric-circle
+   method with the circle drawn for you.</p>
 
    <p class=cite><b>Definition.</b> The bicoxofemoral (hip) axis is the line joining the
    centres of the two femoral heads; the point used for pelvic incidence is its
@@ -38,23 +44,26 @@ CRITERIA = """
    target="_blank" rel="noopener">Radiopaedia &mdash; pelvic incidence</a>
    (femoral head centres as the pelvic reference axis).</p>
 
-   <p><b>How to find it.</b></p>
+   <p><b>How to do it.</b></p>
    <ol>
     <li>Find the round dense head below and anterior to the S1 endplate, seated in the
         acetabulum.</li>
-    <li>Trace the <b>subchondral cortical arc</b> &mdash; the thin dense line of the
-        articular surface. That arc defines the circle. (This is the Mose
-        concentric-circle method, done by eye.)</li>
-    <li>Mark its <b>centre of curvature</b>, <u>not</u> the brightest spot. Overlap with
-        the acetabulum and the opposite head puts the densest shadow <i>medial</i> to the
-        true centre &mdash; that error is systematic, not noise.</li>
-    <li><b>The controls work like a PACS.</b> <b>Scroll</b> zooms about the cursor,
-        <b>left-drag</b> windows the film (left-right contrast, up-down brightness),
-        <b>right-drag</b> pans, a plain <b>click</b> places the mark and <kbd>r</kbd>
-        resets. A faint subchondral arc usually appears with more contrast.
-        <b>Zoom and pan carry over to the next film</b>, so set them once on the hips
-        and keep going.</li>
-    <li><b>Zoom in before you click.</b> At fit-to-window one screen pixel is several
+    <li><b>Click</b> on it to drop a circle.</li>
+    <li><b>Hover the circle and scroll</b> until its edge sits on the <b>subchondral
+        cortical arc</b> &mdash; the thin dense line of the articular surface. Match the
+        <i>arc</i>, not the bright shadow: overlap with the acetabulum puts the densest
+        region <i>medial</i> to the true centre, and that error is systematic, not
+        noise.</li>
+    <li><b>Drag the circle</b> to seat it. Work the size and position together, the way
+        you would slide a Mose template &mdash; when the whole visible arc lies on the
+        circle, the centre is right.</li>
+    <li>The radius carries to the next circle and the next film, so after the first one
+        it usually needs only a nudge.</li>
+    <li><b>Elsewhere the controls are a PACS.</b> Scroll <i>off</i> a circle zooms about
+        the cursor, <b>left-drag</b> on bare film windows it (left-right contrast,
+        up-down brightness), <b>right-drag</b> pans, <kbd>r</kbd> resets. A faint arc
+        usually appears with more contrast. Zoom and pan carry over between films.</li>
+    <li><b>Zoom in before you fit.</b> At fit-to-window one screen pixel is several
         pixels of film &mdash; close enough that the display, rather than your eye,
         would set the limit on how well two readers can agree.</li>
    </ol>
@@ -72,12 +81,12 @@ CRITERIA = """
    <p><b>One circle or two?</b> Three cases, and only the third is a judgement call:</p>
    <ul>
     <li><b>You see one circle</b> &mdash; the usual well-positioned lateral, where the
-        heads superimpose. <b>One mark.</b> It already sits at the midpoint.</li>
+        heads superimpose. <b>One circle.</b> Its centre already sits at the midpoint.</li>
     <li><b>You can clearly resolve two</b>, each with its own concentric subchondral arc.
-        <b>Mark BOTH.</b> Do not pick one. The point we derive is the midpoint, so
+        <b>Fit BOTH.</b> Do not pick one. The point we derive is the midpoint, so
         marking a single head on a film where the heads are separated by
         <i>S</i> puts that point <b><i>S</i>/2 away from the truth</b> &mdash; on a
-        rotated film that is far larger than the agreement tolerance. Two marks is the
+        rotated film that is far larger than the agreement tolerance. Two circles is the
         <i>correct</i> answer here, not the ambitious one.</li>
     <li><b>You can see one clearly and suspect a second</b> without being able to trace
         its arc. Mark the one you are sure of and press <kbd>f</kbd> to flag it. That is
@@ -247,7 +256,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <div id=appui hidden>
 <header>
   <button class=go onclick=load()>Next <kbd>n</kbd></button>
-  <span>click the head centre &mdash; a <b class=rgt>2nd</b> only if you see two distinct circles</span>
+  <span>click to drop a circle &middot; hover it and <b>scroll</b> to size &middot; drag to nudge</span>
   <button class=ghost onclick=undo()>Undo <kbd>u</kbd></button>
   <button class=go onclick=send()>Submit <kbd>&crarr;</kbd></button>
   <button class=nv onclick=notVisible()>Not visible <kbd>v</kbd></button>
@@ -271,7 +280,19 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 </div>
 
 <script>
-let img=new Image(), pts=[], cur=null, nextId=null, nextImg=null, token=null, busy=false;
+let img=new Image(), cur=null, nextId=null, nextImg=null, token=null, busy=false;
+// A circle per head: [cx, cy, r], all as fractions of image WIDTH (r too), so the mark
+// is scale-free like the centres were. sel is the one the wheel resizes.
+//
+// Circles rather than bare points because the centre of a circle matched to the
+// subchondral arc is over-determined by the whole arc, where a directly-clicked centre
+// rests on a single judgement. It is also closer to the published landmark: Legaye
+// defines the hip axis through the head CENTRES, treating the head as a sphere, so
+// fitting the circle is the definition rather than an approximation of it.
+let circles=[], sel=-1;
+// Radius carries across films. Adult heads are a tight distribution and the films are
+// the same study, so after the first one the default is already about right.
+let lastR = 0.07;
 let guideOn=true;
 // Windowing and zoom, PACS-style. The loupe this replaces was covering the anatomy
 // beside the point being placed, which is the one thing you need to see.
@@ -355,7 +376,7 @@ function progress(p){
 }
 async function load(){
   if(busy)return; busy=true;
-  pts=[]; const t0=performance.now();
+  circles=[]; sel=-1; const t0=performance.now();
   try{
     const r=await fetch('/next',{headers:H()});
     if(r.status===401){$('appui').hidden=true;$('gate').hidden=false;return}
@@ -405,13 +426,33 @@ function draw(){
   X.filter='brightness('+gainB+') contrast('+gainC+')';
   X.drawImage(img,0,0);
   X.filter='none';
-  pts.forEach((p,i)=>{
-    X.strokeStyle=i===0?'#00E5A0':'#FF3B30';   // 1st / 2nd mark, NOT left/rightX.lineWidth=Math.max(1.5,img.width/700);
-    const x=p[0]*img.width,y=p[1]*img.height,r=img.width/80;
-    X.beginPath();X.arc(x,y,r,0,7);X.stroke();
-    X.beginPath();X.moveTo(x-r*1.7,y);X.lineTo(x+r*1.7,y);
-    X.moveTo(x,y-r*1.7);X.lineTo(x,y+r*1.7);X.stroke();
+  const lw=Math.max(1.5, img.width/700);
+  circles.forEach((c,i)=>{
+    // 1st / 2nd circle, NOT left/right -- a lateral cannot tell you which is which
+    X.strokeStyle = i===0 ? '#00E5A0' : '#FF3B30';
+    X.lineWidth = lw;
+    const x=c[0]*img.width, y=c[1]*img.height, R=c[2]*img.width;
+    X.beginPath(); X.arc(x,y,R,0,7); X.stroke();          // the fitted head
+    const t=Math.max(6, R*0.28);                          // centre crosshair
+    X.beginPath(); X.moveTo(x-t,y); X.lineTo(x+t,y);
+    X.moveTo(x,y-t); X.lineTo(x,y+t); X.stroke();
+    if(i===sel){                                          // the one the wheel resizes
+      X.setLineDash([lw*3, lw*3]); X.lineWidth=lw*0.8;
+      X.beginPath(); X.arc(x,y,R*1.18,0,7); X.stroke();
+      X.setLineDash([]);
+    }
   });
+  if(circles.length===2){                                 // the derived hip point
+    const a=circles[0], b=circles[1];
+    const mx=(a[0]+b[0])/2*img.width, my=(a[1]+b[1])/2*img.height;
+    X.strokeStyle='#f5a524'; X.lineWidth=lw;
+    X.beginPath();
+    X.moveTo(a[0]*img.width,a[1]*img.height);
+    X.lineTo(b[0]*img.width,b[1]*img.height);
+    X.stroke();
+    X.fillStyle='#f5a524';
+    X.beginPath(); X.arc(mx,my,Math.max(3,lw*2),0,7); X.fill();
+  }
 }
 /* PACS mapping:
      wheel        zoom, about the cursor
@@ -433,9 +474,37 @@ function zoomAt(e, inwards){
   st.scrollTop  += (fy*r2.height - (e.clientY - r2.top));
   rememberPan(); draw(); showWL();
 }
+// Image coordinates (fraction of width/height) under the pointer.
+function at(e){
+  const r=C.getBoundingClientRect();
+  return [(e.clientX-r.left)/r.width, (e.clientY-r.top)/r.height];
+}
+// Which circle the pointer is inside, or -1. Aspect matters: x is a fraction of width
+// and y a fraction of height, so the y term has to be rescaled before comparing to r.
+function hit(p){
+  const asp=img.height/img.width;
+  for(let i=circles.length-1;i>=0;i--){
+    const c=circles[i];
+    const dx=p[0]-c[0], dy=(p[1]-c[1])*asp;
+    if(Math.hypot(dx,dy) <= c[2]*1.15) return i;
+  }
+  return -1;
+}
+
+// The wheel resizes the circle under the cursor and zooms everywhere else. Hovering the
+// thing you want to change is unambiguous, and it keeps the wheel doing one obvious job
+// in each place rather than needing a modifier.
 C.addEventListener('wheel',e=>{
   if(!img.width)return;
   e.preventDefault();
+  const i=hit(at(e));
+  if(i>=0){
+    sel=i;
+    circles[i][2]=clamp(circles[i][2]*(e.deltaY<0?1.06:1/1.06), 0.01, 0.35);
+    lastR=circles[i][2];                 // carries to the next circle and the next film
+    draw();
+    return;
+  }
   zoomAt(e, e.deltaY < 0);
 },{passive:false});
 
@@ -443,10 +512,13 @@ const DRAG_MIN = 4;
 let drag = null;
 C.addEventListener('pointerdown',e=>{
   if(!img.width || (e.button !== 0 && e.button !== 2)) return;
-  const st=$('stage');
+  const st=$('stage'), p=at(e), i=(e.button===0 ? hit(p) : -1);
+  if(i>=0) sel=i;
   drag={x:e.clientX, y:e.clientY, b:gainB, c:gainC, moved:0, btn:e.button,
+        circle:i, cx:i>=0?circles[i][0]:0, cy:i>=0?circles[i][1]:0,
         sl:st.scrollLeft, stp:st.scrollTop};
   try{ C.setPointerCapture(e.pointerId); }catch(err){}
+  if(i>=0) draw();
 });
 C.addEventListener('pointermove',e=>{
   if(!drag) return;
@@ -459,6 +531,14 @@ C.addEventListener('pointermove',e=>{
     rememberPan();
     return;
   }
+  if(drag.circle >= 0){                     // nudge the circle you grabbed
+    if(drag.moved < DRAG_MIN) return;
+    const r=C.getBoundingClientRect();
+    circles[drag.circle][0]=clamp(drag.cx + dx/r.width, 0, 1);
+    circles[drag.circle][1]=clamp(drag.cy + dy/r.height, 0, 1);
+    draw();
+    return;
+  }
   if(drag.moved < DRAG_MIN) return;
   gainC=clamp(drag.c + dx*0.005, 0.3, 5);
   gainB=clamp(drag.b - dy*0.004, 0.2, 3);
@@ -468,17 +548,20 @@ C.addEventListener('pointerup',e=>{
   const d=drag; drag=null;
   if(!d) return;
   try{ C.releasePointerCapture(e.pointerId); }catch(err){}
-  if(d.moved < DRAG_MIN && d.btn === 0) place(e);      // a click, not a drag
+  // a click on empty film drops a circle; a click on an existing one just selects it
+  if(d.moved < DRAG_MIN && d.btn === 0 && d.circle < 0) place(e);
 });
 C.addEventListener('pointercancel',()=>{drag=null});
 C.addEventListener('contextmenu',e=>e.preventDefault());   // right-drag is panning
 
 function place(e){
-  if(pts.length>=2||!img.width)return;
-  const r=C.getBoundingClientRect();
-  pts.push([(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]);draw();
+  if(circles.length>=2||!img.width)return;
+  const p=at(e);
+  circles.push([p[0], p[1], lastR]);
+  sel=circles.length-1;
+  draw();
 }
-function undo(){pts.pop();draw()}
+function undo(){ circles.pop(); sel=circles.length-1; draw(); }
 
 function toggleGuide(on){
   guideOn = (on===undefined) ? !guideOn : on;
@@ -496,10 +579,14 @@ async function post(url,fields){
 }
 async function send(){
   if(!cur){return}
-  if(!pts.length){msg('mark the head centre, or use Not visible');return}
-  // an unordered list: a lateral cannot tell you which head is which
+  if(!circles.length){msg('circle a femoral head, or use Not visible');return}
+  // heads = the centres, unordered, exactly as before -- everything downstream keeps
+  // working. radii ride along: they give a per-film scale reference and flag an
+  // ambiguous arc when two readers fit very different circles.
   const j=await post('/submit',{case_id:cur.case_id,slot:cur.slot,
-    points:JSON.stringify({heads:pts,w:img.width,h:img.height})});
+    points:JSON.stringify({heads:circles.map(c=>[c[0],c[1]]),
+                           radii:circles.map(c=>c[2]),
+                           w:img.width,h:img.height})});
   if(j){progress(j.progress);load()}
 }
 async function notVisible(){
