@@ -110,7 +110,20 @@ with sync_playwright() as p:
               canvasCssH:c.style.height, imgH:img.height, zoom:zoom};
     })()"""))
 
+    example = pg.locator("#example").bounding_box()
+    print(f"       example {example}")
     check(guide["x"] < stage["x"], "guide is on the LEFT of the film")
+    check(example["x"] > stage["x"] + stage["width"] - 2,
+          "worked example is on the RIGHT of the film")
+    check(pg.eval_on_selector_all("#example img", "e => e.length") == 3,
+          "three example panels are shown")
+    check(pg.evaluate("""(()=>{const e=document.getElementById('example');
+                               return e.scrollHeight > e.clientHeight})()"""),
+          "the example column scrolls independently")
+    # panels must actually be served, not broken images
+    check(pg.evaluate("""(()=>[...document.querySelectorAll('#example img')]
+                               .every(i=>i.naturalWidth>0))()"""),
+          "every example panel image loaded")
     check(canvas["x"] > guide["x"] + guide["width"] - 2,
           "film is on the RIGHT, clear of the guide")
     check(guide["height"] <= VIEW["height"], "guide fits the window (scrolls internally)")

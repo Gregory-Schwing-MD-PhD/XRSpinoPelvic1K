@@ -154,6 +154,14 @@ def main():
     fig.save(OUT, optimize=True)
     print(f"wrote {OUT}  ({fig.width}x{fig.height}, {OUT.stat().st_size/1000:.0f} kB)")
 
+    # Also emit the panels separately. The composite is 1648 px wide and unreadable in a
+    # ~340 px sidebar; stacked panels at column width are legible, which is where the
+    # reader actually needs them.
+    for name, panel in (("a", A), ("b", B), ("c", Cp)):
+        fp = OUT.with_name(f"ref_{name}.png")
+        panel.save(fp, optimize=True)
+        print(f"  panel {name}: {fp.name}  {panel.width}x{panel.height}")
+
 
 if __name__ == "__main__":
     main()

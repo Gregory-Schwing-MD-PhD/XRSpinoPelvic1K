@@ -530,12 +530,25 @@ def reference():
     sphere fit projected, not a person's opinion, and it is a fixed teaching image rather
     than any film in the queue.
     """
+    return _png("reference_femhead.png")
+
+
+@app.get("/reference/{panel}")
+def reference_panel(panel: str):
+    """One panel of the teaching figure. The composite is 1648 px wide and illegible in
+    a sidebar; the panels are served separately so they can be stacked at column width."""
+    if panel not in ("a", "b", "c"):
+        raise HTTPException(404, "no such panel")
+    return _png(f"ref_{panel}.png")
+
+
+def _png(name: str):
     here = os.path.dirname(os.path.abspath(__file__))
-    fp = os.path.join(here, "reference_femhead.png")
+    fp = os.path.join(here, name)
     if os.path.exists(fp):
         return Response(open(fp, "rb").read(), media_type="image/png",
                         headers={"Cache-Control": "public, max-age=86400"})
-    raise HTTPException(404, "reference image not bundled")
+    raise HTTPException(404, f"{name} not bundled")
 
 
 @app.get("/", response_class=HTMLResponse)

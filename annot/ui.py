@@ -132,20 +132,31 @@ CRITERIA = """
    rather another reader took). Pass records nothing.</p>
   </div>
 
-  <div class=helpimgs>
-   <figure>
-    <img src="/reference" alt="where the femoral head is on a lateral film"
-         onerror="this.parentNode.style.display='none'">
-    <figcaption>Where to look, and the centre of curvature of the subchondral arc.</figcaption>
-   </figure>
-   <figure>
-    <img src="/example" alt="worked example"
-         onerror="this.parentNode.style.display='none'">
-    <figcaption>Worked example on a synthetic radiograph, where the centre is a 3-D
-    sphere fit rather than anyone's opinion.</figcaption>
-   </figure>
-  </div>
  </div>
+</aside>
+"""
+
+EXAMPLES = """
+<aside id=example>
+  <h3>Worked example</h3>
+  <figure>
+   <img src="/reference/c" alt="two femoral heads, each with a fitted circle">
+   <figcaption><b>Two heads.</b> Same diameter, offset front-to-back, a circle on each.
+   The midpoint between the centres is derived for you.</figcaption>
+  </figure>
+  <figure>
+   <img src="/reference/b" alt="the concentric-circle construction on one head">
+   <figcaption><b>One head.</b> Size the circle to the subchondral cortical arc, not to
+   the brightest shadow.</figcaption>
+  </figure>
+  <figure>
+   <img src="/reference/a" alt="where the femoral head sits on a lateral film">
+   <figcaption><b>Where to look.</b> Below and anterior to the S1 endplate, seated in
+   the acetabulum.</figcaption>
+  </figure>
+  <p class=exnote>Drawn on a DRR of a segmented CT, so the marked centre is a 3-D sphere
+  fit projected &mdash; not anyone's opinion. The second head in the top panel is a
+  schematic: a DRR integrates along the hip axis, so its two heads superimpose exactly.</p>
 </aside>
 """
 
@@ -180,9 +191,27 @@ STYLE = """
     buttons are added, and any fixed --hdr is wrong the moment it does. */
  #appui{display:flex;flex-direction:column;height:100vh}
  #appui[hidden]{display:none}
- #split{flex:1 1 auto;display:grid;grid-template-columns:var(--guide,430px) 1fr;
+ /* Three columns: instructions, the film, the worked example. The film keeps the
+    middle and grows with the window; the two reference columns are fixed so the
+    example is always beside the thing being matched rather than scrolled away. */
+ #split{flex:1 1 auto;display:grid;
+        grid-template-columns:var(--guide,410px) 1fr var(--example,330px);
         min-height:0}
- #split.noguide{grid-template-columns:0 1fr}
+ #split.noguide{grid-template-columns:0 1fr var(--example,330px)}
+ #split.noex{grid-template-columns:var(--guide,410px) 1fr 0}
+ #split.noguide.noex{grid-template-columns:0 1fr 0}
+ #split.noex #example{visibility:hidden;border-left:0}
+ #example{overflow-y:auto;overflow-x:hidden;min-width:0;background:#15151b;
+          border-left:1px solid #2a2a33;padding:12px 14px}
+ #example h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;
+             letter-spacing:.1em;color:#8a94a0}
+ #example figure{margin:0 0 14px}
+ #example img{width:100%;border:1px solid #333;border-radius:6px;display:block;
+              background:#000;cursor:zoom-in}
+ #example img:hover{border-color:var(--go)}
+ #example figcaption{font-size:11.5px;color:#9aa6b2;line-height:1.45;margin-top:5px}
+ .exnote{font-size:11px;color:#6d7681;line-height:1.45;border-top:1px solid #2a2a33;
+         padding-top:10px}
  /* visibility, NOT display:none. Removing the guide from the grid drops the
     film into the first (zero-width) column and it collapses to nothing. */
  #split.noguide #guide{visibility:hidden;border-right:0}
@@ -266,6 +295,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
      style="text-decoration:none;padding:7px 13px;border-radius:6px;
             border:1px solid #3a3a44">Board</a>
   <button class=ghost onclick=toggleGuide()>Guide <kbd>g</kbd></button>
+  <button class=ghost onclick=toggleEx()>Example <kbd>x</kbd></button>
   <span id=wl title="scroll = zoom · left-drag = window/level · right-drag = pan · click = mark · r = reset. Zoom and pan carry over to the next film."></span>
   <span id=who></span>
   <div class=bar title="cases finalised"><i id=barfill style="width:0"></i></div>
@@ -276,6 +306,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
   <section id=stage>
     <div id=wrap><canvas id=c></canvas></div>
   </section>
+""" + EXAMPLES + """
 </main>
 </div>
 
@@ -293,7 +324,7 @@ let circles=[], sel=-1;
 // Radius carries across films. Adult heads are a tight distribution and the films are
 // the same study, so after the first one the default is already about right.
 let lastR = 0.07;
-let guideOn=true;
+let guideOn=true, exOn=true;
 // Windowing and zoom, PACS-style. The loupe this replaces was covering the anatomy
 // beside the point being placed, which is the one thing you need to see.
 //
@@ -348,7 +379,11 @@ async function boot(){
 }
 async function start(){
   $('gate').hidden=true; $('appui').hidden=false;
-  try{ toggleGuide(localStorage.getItem('annot_guide')!=='0'); }catch(e){}
+  try{ toggleGuide(localStorage.getItem('annot_guide')!=='0');
+       toggleEx(localStorage.getItem('annot_ex')!=='0'); }catch(e){}
+  // click any example to open it full size in a tab
+  document.querySelectorAll('#example img').forEach(im=>
+    im.onclick=()=>window.open(im.src,'_blank','noopener'));
   showWL();
   if(token && !$('who').textContent){
     $('who').textContent='using pasted token';
@@ -569,6 +604,12 @@ function toggleGuide(on){
   requestAnimationFrame(fit);
   try{localStorage.setItem('annot_guide', guideOn?'1':'0')}catch(e){}
 }
+function toggleEx(on){
+  exOn = (on===undefined) ? !exOn : on;
+  $('split').classList.toggle('noex', !exOn);
+  requestAnimationFrame(fit);
+  try{localStorage.setItem('annot_ex', exOn?'1':'0')}catch(e){}
+}
 
 async function post(url,fields){
   const b=new FormData();
@@ -626,6 +667,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='n')load();
   else if(e.key==='r')resetView();
   else if(e.key==='g')toggleGuide();
+  else if(e.key==='x')toggleEx();
   else if(e.key==='f')flagIt();
 });
 window.addEventListener('resize', fit);
