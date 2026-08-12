@@ -235,9 +235,37 @@ with sync_playwright() as p:
     check(pg.evaluate("circles.length") == 2, "a second circle can be placed")
     check(abs(pg.evaluate("circles[1][2]") - pg.evaluate("circles[0][2]")) < 1e-6,
           "the second circle inherits the sized radius")
-    check(pg.evaluate("circles.length") == 2 and
-          pg.evaluate("(()=>{const b=document.getElementById('c');return b.width>0})()"),
-          "two circles is the maximum")
+    # OVERLAPPING circles must both stay readable, so the interiors are stroke-only.
+    # Two heads on a rotated film overlap by construction; a filled disc would hide the
+    # arc of whichever circle was drawn first, which is the thing being matched.
+    pg.evaluate("""(()=>{
+        circles.length=0;
+        circles.push([0.44,0.55,0.10],[0.56,0.57,0.10]);   // deliberately overlapping
+        sel=1; draw();
+    })()""")
+    pg.wait_for_timeout(200)
+    px = pg.evaluate("""(()=>{
+        const g=C.getContext('2d');
+        const rd=(fx,fy)=>{const d=g.getImageData(Math.round(fx*C.width),
+                                                  Math.round(fy*C.height),1,1).data;
+                           return [d[0],d[1],d[2]];};
+        // sample EMPTY interior: the centres carry a crosshair and the amber hip-axis
+        // line runs exactly through both, so sampling a centre reads the marker, not
+        // the fill, which is what this check is actually about
+        return {inside1: rd(0.415,0.585),    // inside circle 0, off its crosshair
+                inside2: rd(0.585,0.545),    // inside circle 1, off its crosshair
+                lens:    rd(0.500,0.530),    // the overlap, above the axis line
+                film:    rd(0.200,0.200)};   // bare film for reference
+    })()""")
+    print(f"       pixels {px}")
+    same = lambda a, b: all(abs(x - y) <= 6 for x, y in zip(a, b))
+    check(same(px["inside1"], px["film"]),
+          f"first circle is not filled -- film shows through ({px['inside1']})")
+    check(same(px["inside2"], px["film"]),
+          f"second circle is not filled ({px['inside2']})")
+    check(same(px["lens"], px["film"]),
+          f"the overlap of two circles stays transparent ({px['lens']})")
+    pg.screenshot(path=str(SHOTS / "4_two_circles.png"))
     pg.screenshot(path=str(SHOTS / "3_marked.png"))
     br.close()
 
