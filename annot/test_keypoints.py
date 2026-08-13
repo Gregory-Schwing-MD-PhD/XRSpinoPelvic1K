@@ -1,16 +1,15 @@
 """The keypoint export, against a ledger built to break it.
 
-The thing worth testing here is not that files appear. It is that the VISIBILITY FLAGS
-are honest, because they are the only thing standing between "we resampled the circle at
-eight clock angles" and "we invented rim where the reader could not see any". Each case
-below is a specific way that could go wrong.
+The thing worth testing is not that files appear. It is that the VISIBILITY FLAGS are
+honest, because they are the only thing standing between "the readers named these three
+extremes" and "we made up a landmark where nobody could see one". Each case below is a
+specific way that could go wrong.
 
     python annot/test_keypoints.py
 """
 from __future__ import annotations
 
 import json
-import math
 import subprocess
 import sys
 import tempfile
@@ -27,13 +26,21 @@ def check(cond, what):
         fails.append(what)
 
 
-def arcread(cx, cy, R, lo_deg, span_deg, n=5):
-    """A read that traced `span_deg` of rim starting at `lo_deg`."""
-    lo, sp = math.radians(lo_deg), math.radians(span_deg)
-    pts = [[(cx + R * math.cos(lo + sp * i / (n - 1))) / W,
-            (cy + R * math.sin(lo + sp * i / (n - 1))) / H] for i in range(n)]
-    return {"tool": "arc", "heads": [[cx / W, cy / H]], "radii": [R / W], "arcs": [pts],
-            "arc_lo": [lo], "arc_span": [sp], "w": W, "h": H}
+def arc(cx, cy, R, seen=("A", "S", "P"), facing="left", tilt=0.0):
+    """A read that named `seen` and could not trace the rest.
+
+    Facing left puts anterior at image-left, so A sits at cx-R and P at cx+R.
+    """
+    sgn = -1 if facing == "left" else 1
+    P = {"A": [(cx + sgn * R) / W, cy / H],
+         "S": [cx / W, (cy - R) / H],
+         "P": [(cx - sgn * R) / W, cy / H]}
+    lm = {}
+    for r in ("A", "S", "P"):
+        lm[r] = {"xy": P[r], "src": "obs"} if r in seen else {"src": "derived"}
+    return {"tool": "arc", "heads": [[cx / W, cy / H]], "radii": [R / W],
+            "landmarks": [lm], "facing": [facing], "ap_tilt_deg": [tilt],
+            "extra": [[]], "w": W, "h": H}
 
 
 def case(cid, p1, p2=None, **kw):
@@ -47,25 +54,36 @@ def case(cid, p1, p2=None, **kw):
 
 T = Path(tempfile.mkdtemp(prefix="kpledger_"))
 (T / "cases").mkdir()
+
+two_a = {"tool": "arc", "heads": [[0.44, 0.37], [0.56, 0.38]], "radii": [0.08, 0.08],
+         "landmarks": [{r: {"xy": [0.44, 0.37], "src": "obs"} for r in "ASP"},
+                       {r: {"xy": [0.56, 0.38], "src": "obs"} for r in "ASP"}],
+         "facing": ["left", "left"], "ap_tilt_deg": [0, 0], "w": W, "h": H}
+two_b = {"tool": "arc", "heads": [[0.561, 0.381], [0.441, 0.371]], "radii": [0.08, 0.08],
+         "landmarks": [{r: {"xy": [0.561, 0.381], "src": "obs"} for r in "ASP"},
+                       {r: {"xy": [0.441, 0.371], "src": "obs"} for r in "ASP"}],
+         "facing": ["left", "left"], "ap_tilt_deg": [0, 0], "w": W, "h": H}
+
 RECS = [
-    case("full",  arcread(700, 900, 120, 0, 350), arcread(702, 901, 121, 0, 350)),
-    case("cap",   arcread(700, 900, 120, 200, 80), arcread(701, 899, 119, 205, 75)),
-    # the readers walked DIFFERENT halves. Only the overlap is evidence; a union would
-    # quietly turn one reader's word into the other's observation.
-    case("halfA", arcread(700, 900, 120, 0, 180), arcread(700, 900, 120, 170, 180)),
+    # both readers named all three
+    case("full", arc(700, 900, 120), arc(702, 901, 121)),
+    # both could only trace the top: A and P are derived, and must not be trained on
+    case("captop", arc(700, 900, 120, seen=("S",)), arc(701, 899, 119, seen=("S",))),
+    # ONE reader saw the anterior extreme, the other did not
+    case("onlyone", arc(700, 900, 120, seen=("A", "S", "P")),
+                    arc(701, 899, 119, seen=("S", "P"))),
+    # the readers disagree about which way the patient faces: an anterior label on
+    # posterior cortex is worse than no label, so this has to be surfaced
+    case("faceclash", arc(700, 900, 120), arc(701, 899, 119, facing="right")),
+    # a legacy circle-tool read: a centre and nothing else
     case("legacy", {"tool": "circle", "heads": [[0.5, 0.37]], "radii": [0.086],
                     "w": W, "h": H},
                    {"tool": "circle", "heads": [[0.505, 0.372]], "radii": [0.088],
                     "w": W, "h": H}),
     # two heads, marked in OPPOSITE order by the two readers
-    case("two", {"tool": "arc", "heads": [[0.44, 0.37], [0.56, 0.38]],
-                 "radii": [0.08, 0.08], "arc_lo": [0.0, 0.0], "arc_span": [6.1, 6.1],
-                 "w": W, "h": H},
-                {"tool": "arc", "heads": [[0.561, 0.381], [0.441, 0.371]],
-                 "radii": [0.08, 0.08], "arc_lo": [0.0, 0.0], "arc_span": [6.1, 6.1],
-                 "w": W, "h": H}),
+    case("two", two_a, two_b),
     case("nohead", {"heads": [], "w": W, "h": H}, final={"points": None}),
-    case("single", arcread(700, 900, 120, 0, 350)),          # only one read
+    case("single", arc(700, 900, 120)),                    # only one read
 ]
 for r in RECS:
     (T / "cases" / f"{r['case_id']}.json").write_text(json.dumps(r))
@@ -79,63 +97,78 @@ lab = {}
 for f in sorted(OUT.rglob("*.txt")):
     lab[f.stem] = [ln.split() for ln in f.read_text().strip().split("\n")]
 
-
-def vis(row):
-    return [int(row[7 + 3 * i]) for i in range(9)]
+KP = {"centre": 0, "A": 1, "S": 2, "P": 3}
 
 
-def kp(row, i):
+def vis(row, name):
+    return int(row[7 + 3 * KP[name]])
+
+
+def kp(row, name):
+    i = KP[name]
     return (float(row[5 + 3 * i]), float(row[6 + 3 * i]))
 
 
-check("nohead" not in lab, "a film settled as no-visible-head is not exported at all")
+print("\n[1] what is exported at all")
+check("nohead" not in lab, "a film settled as no-visible-head is not exported")
 check("single" not in lab, "a film with one read is held back unless --include-single")
-check(set(lab) == {"full", "cap", "halfA", "legacy", "two"},
+check(set(lab) == {"full", "captop", "onlyone", "faceclash", "legacy", "two"},
       f"exactly the usable films are exported ({sorted(lab)})")
+check(all(len(r) == 5 + 3 * 4 for rows in lab.values() for r in rows),
+      "every line is bbox + 4 keypoints, the fixed positional contract")
 
-check(all(v[0] == 2 for rows in lab.values() for v in map(vis, rows)),
-      "the centre keypoint is always present -- it is what the study needs")
-check(sum(1 for v in vis(lab["full"][0])[1:] if v) == 8,
-      "a rim traced right round exports all 8 clock angles as observed")
-check(sum(1 for v in vis(lab["cap"][0])[1:] if v) == 2,
-      f"a superior-cap-only read exports 2 of 8 "
-      f"({sum(1 for v in vis(lab['cap'][0])[1:] if v)})")
-check(sum(1 for v in vis(lab["halfA"][0])[1:] if v) == 1,
-      "two readers who traced different halves export only their OVERLAP, not the union")
-check(sum(1 for v in vis(lab["legacy"][0])[1:] if v) == 0,
-      "a circle-tool read contributes a centre and NO rim evidence by default")
+print("\n[2] visibility is earned, not assumed")
+check(all(vis(r, "centre") == 2 for rows in lab.values() for r in rows),
+      "the centre is always present -- derived, but always determined")
+check(all(vis(lab["full"][0], n) == 2 for n in "ASP"),
+      "three extremes both readers named are all visible")
+check(vis(lab["captop"][0], "S") == 2
+      and vis(lab["captop"][0], "A") == 0 and vis(lab["captop"][0], "P") == 0,
+      "an extreme NEITHER reader could trace is excluded from the loss (v=0)")
+check(vis(lab["onlyone"][0], "A") == 1,
+      f"an extreme only ONE reader traced is kept at lower confidence "
+      f"(v={vis(lab['onlyone'][0], 'A')})")
+check(vis(lab["onlyone"][0], "S") == 2, "while the ones both traced stay at v=2")
+check(all(vis(lab["legacy"][0], n) == 0 for n in "ASP"),
+      "a circle-tool read contributes a centre and no landmarks at all")
 
-# geometry: the exported rim points must actually sit on the circle the readers fitted
-row = lab["full"][0]
-cx, cy = kp(row, 0)
-R = float(row[3]) / 2 / 1.25                       # bbox width was 2R padded by 1.25
-asp = W / H
-d = [math.hypot(kp(row, i)[0] - cx, (kp(row, i)[1] - cy) / asp) for i in range(1, 9)]
-check(max(abs(x - R) for x in d) < 1e-4,
-      f"every rim keypoint lies on the fitted circle, aspect included "
-      f"(spread {max(d) - min(d):.2e})")
-ang = sorted(round(math.degrees(math.atan2((kp(row, i)[1] - cy) / asp,
-                                           kp(row, i)[0] - cx)) % 360)
-             for i in range(1, 9))
-check(ang == [0, 45, 90, 135, 180, 225, 270, 315],
-      f"and at fixed clock angles, so keypoint k means the same place every time ({ang})")
+print("\n[3] a derived landmark still lands somewhere defensible")
+row = lab["captop"][0]
+cx, cy = kp(row, "centre")
+ax, _ = kp(row, "A")
+px, _ = kp(row, "P")
+check(ax < cx < px,
+      f"the derived anterior point is on the ANTERIOR side for a left-facing film "
+      f"(A={ax:.3f} centre={cx:.3f} P={px:.3f})")
+check(kp(row, "S")[1] < cy, "and the superior one is above the centre")
 
-# order-free pairing: reader B marked the two heads the other way round
+print("\n[4] pairing and facing")
 check(len(lab["two"]) == 2, "two heads export as two instances")
-xs = sorted(kp(r, 0)[0] for r in lab["two"])
+xs = sorted(kp(r, "centre")[0] for r in lab["two"])
 check(abs(xs[0] - 0.4405) < 1e-3 and abs(xs[1] - 0.5605) < 1e-3,
       f"readers who marked the heads in opposite order are paired correctly ({xs})")
 man = json.loads((OUT / "manifest.json").read_text())
-mid = next(f["bicoxofemoral"] for f in man["films"] if f["case"] == "two")
-check(abs(mid[0] - 0.5005) < 1e-3,
-      f"and the bicoxofemoral midpoint survives into the manifest ({mid})")
+by = {f["case"]: f for f in man["films"]}
+check(abs(by["two"]["bicoxofemoral"][0] - 0.5005) < 1e-3,
+      f"the bicoxofemoral midpoint survives into the manifest "
+      f"({by['two']['bicoxofemoral']})")
+check(by["full"]["facing"] == "left", "facing is carried through the export")
+check(by["faceclash"]["facing"] == "",
+      "and readers who disagree about facing yield NO facing rather than a coin flip")
+check(all(vis(lab["faceclash"][0], n) == 2 for n in "ASP"),
+      "their named extremes are still exported -- the positions were agreed, the "
+      "direction label was not")
 
-# a horizontal flip must map image-right rim onto image-left rim, or flip augmentation
-# silently trains the model on mismatched keypoints
-flip = json.loads([l for l in (OUT / "data.yaml").read_text().splitlines()
+print("\n[5] the dataset declaration")
+yaml = (OUT / "data.yaml").read_text()
+check("kpt_shape: [4, 3]" in yaml, "kpt_shape matches the four keypoints written")
+flip = json.loads([l for l in yaml.splitlines()
                    if l.startswith("flip_idx")][0].split(":", 1)[1])
-check(flip[0] == 0 and all(flip[flip[i]] == i for i in range(len(flip))),
-      f"flip_idx is a valid involution fixing the centre ({flip})")
+check(flip == [0, 3, 2, 1],
+      f"a horizontal flip exchanges anterior and posterior ({flip})")
+check(all(flip[flip[i]] == i for i in range(len(flip))), "and is a valid involution")
+check("not a landmark" in yaml and "TANGENCY" in yaml,
+      "the yaml says why the centre is derived and the extremes are not")
 
 print("\nFAILED: " + "; ".join(fails) if fails else "\nALL CHECKS PASSED")
 sys.exit(1 if fails else 0)

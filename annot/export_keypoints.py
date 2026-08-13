@@ -19,25 +19,33 @@ that are not equidistant from the predicted centre are also a free consistency c
 a way for the model to say "this hip is unreliable" that a bare centre regression cannot
 express.
 
-THE CATCH, AND THE FIX
-----------------------
-YOLO-Pose keypoints are a POSITIONAL CONTRACT: keypoint k must mean the same anatomical
-thing on every image, because the loss compares keypoint k to keypoint k. Raw rim clicks
-break that immediately -- a reader's first click is 12 o'clock on one film and 4 o'clock
-on the next, and averaged over a dataset that trains the model to predict the mean of the
-rim, which is the centre, badly.
+A LANDMARK HAS TO BE FINDABLE, NOT MERELY CONSISTENT
+----------------------------------------------------
+An earlier version of this file resampled the fitted circle at fixed clock angles and
+exported those as keypoints. They were perfectly consistent between films and still the
+wrong target, for a reason worth writing down:
 
-So the raw clicks are NOT exported. They are used to fit a circle, and the export
-resamples that circle at FIXED CLOCK ANGLES. The reader clicks wherever the cortex is
-clear; the training target is deterministic. Keypoint 3 is always the same place on the
-head.
+  * "the rim point at 45 degrees" is only defined ONCE YOU HAVE THE CENTRE. The target
+    was a function of the answer.
+  * a femoral head is rotationally symmetric, so there is no local image evidence
+    whatsoever separating the rim at 45 degrees from the rim at 50. A detector could only
+    find it by localising the whole head first -- which is to say, by regressing an
+    inferred quantity in disguise, exactly the problem the rim was supposed to solve.
 
-The angles are defined in IMAGE directions (right, down, left, up), not anatomical ones.
-That is deliberate. Whether image-left is anterior or posterior depends on which way the
-patient faced, which varies across this set -- but the femoral head is a SPHERE, so its
-rim looks the same at every clock angle and the distinction that would matter for, say,
-a vertebral corner does not exist here. Image directions are consistent, checkable, and
-sufficient.
+So the exported keypoints are the three NAMED EXTREMES the reader actually marks:
+anterior, superior, posterior. An extreme is a tangency condition -- the cortex is
+vertical at A and P, horizontal at S -- and that IS local image evidence, findable
+without knowing the centre. It is also the positional contract YOLO-Pose needs, because
+keypoint 2 is the superior extreme on every film by construction rather than by
+resampling convention.
+
+FACING IS RECORDED, NOT ASSUMED
+-------------------------------
+On a lateral, anterior is a DIRECTION, and which way the patient faced varies across this
+set. If it is not carried through, every A/P label in the export is a coin flip and the
+positional contract is broken again in a way no test would notice. The annotator derives
+it from the order the reader marked A and P and stores it per head; this exporter uses it
+only as a consistency check, since the labels themselves are already anatomical.
 
 VISIBILITY IS NOT DECORATION
 ----------------------------
@@ -60,16 +68,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-# 4 rim points + the derived centre. The rim points are the supervision; the centre is the
-# quantity the study needs. More rim points give the circle-refit at inference more to
-# work with, at the cost of more of them falling outside the observed span on tight films.
-RIM = 8
-CENTRE_KP = 0                     # keypoint 0 is the centre, 1..RIM are the rim clockwise
-
-
-def rim_angles(n: int = RIM) -> list:
-    """Fixed clock angles, image coordinates (y down). 0 = image-right, pi/2 = image-down."""
-    return [2 * math.pi * i / n for i in range(n)]
+# keypoint 0 is the DERIVED centre; 1..3 are the marked extremes. Four, fixed, named.
+ROLES = ["A", "S", "P"]
+KP_NAMES = ["centre", "anterior", "superior", "posterior"]
 
 
 # ---------------------------------------------------------------- reading the ledger
@@ -111,26 +112,43 @@ def _pair(A: list, B: list) -> list:
     return [(i, j)]
 
 
-def _spans(p, k: int):
-    """(lo, span) in radians for head k, or None when the read carries no arc."""
-    lo, sp = p.get("arc_lo"), p.get("arc_span")
-    if not isinstance(lo, list) or not isinstance(sp, list) or k >= len(lo):
-        return None
-    return float(lo[k]), float(sp[k])
-
-
-def _observed(ang: float, lo: float, span: float) -> bool:
-    return ((ang - lo) % (2 * math.pi)) <= span + 1e-9
-
-
 # ---------------------------------------------------------------- building instances
-def instances(case: dict, circle_rim: bool, include_single: bool) -> list:
-    """One record per femoral head: consensus centre, radius, and per-angle visibility.
+def _lm(p, k: int) -> dict:
+    """Reader `p`'s named landmarks for head k, or {} for a read that has none."""
+    L = p.get("landmarks")
+    return L[k] if isinstance(L, list) and k < len(L) and isinstance(L[k], dict) else {}
 
-    Uses BOTH readers where the case is finalised -- the centre and radius are averaged
-    over the pairing, and a clock angle counts as observed only when BOTH readers marked
-    evidence there. Intersection rather than union: a target one reader never looked at is
-    not a target two readers agreed on.
+
+def _dir(role: str, facing: str):
+    """Unit direction from the centre to a named extreme, image coordinates (y down).
+
+    Only needed for an extreme NOBODY marked, which is then written as unobserved -- but it
+    still has to land on the right side of the head, or the label file would carry a
+    posterior point sitting anteriorly and quietly poison any later re-derivation.
+    """
+    if role == "S":
+        return (0.0, -1.0)
+    if not facing:
+        return None                                   # unknowable: no A/P was ever marked
+    ant_left = (facing == "left")
+    if role == "P":
+        ant_left = not ant_left
+    return (-1.0, 0.0) if ant_left else (1.0, 0.0)
+
+
+def _at(seq, k, default=""):
+    return seq[k] if isinstance(seq, list) and k < len(seq) else default
+
+
+def instances(case: dict, circle_rim: bool, include_single: bool) -> list:
+    """One record per femoral head: consensus centre, radius, and the three extremes.
+
+    Both readers are used where the case is finalised. A landmark seen by BOTH is the mean
+    of their two clicks and is exported as visible; one seen by only one reader keeps that
+    reader's position at lower confidence; one neither reader could trace is placed from
+    the fitted circle and marked NOT VISIBLE so it never enters the loss. The asymmetry is
+    deliberate -- a landmark half the readers could not find is not the same evidence as
+    one they both put in the same place.
     """
     slots = case.get("slots") or {}
     reads = [s for s in slots.values()
@@ -140,7 +158,7 @@ def instances(case: dict, circle_rim: bool, include_single: bool) -> list:
     if len(reads) < 2 and not include_single:
         return []
     if case.get("final") and case["final"].get("points") is None:
-        return []                                  # settled as no visible head
+        return []                                     # settled as no visible head
 
     P = [r["points"] for r in reads[:2]]
     dims = next((p for p in P if p.get("w") and p.get("h")), None)
@@ -157,65 +175,91 @@ def instances(case: dict, circle_rim: bool, include_single: bool) -> list:
         idx = [(0, a)] + ([(1, b)] if len(P) == 2 else [])
         cx = sum(Hd[i][k][0] for i, k in idx) / len(idx)
         cy = sum(Hd[i][k][1] for i, k in idx) / len(idx)
-        rr = [(P[i].get("radii") or [])[k] for i, k in idx
-              if k < len(P[i].get("radii") or [])]
-        rr = [r for r in rr if r]
+        rr = [x for x in ((P[i].get("radii") or [None] * (k + 1))[k] for i, k in idx) if x]
         if not rr:
             continue
-        R = sum(rr) / len(rr)                       # fraction of image WIDTH
+        R = sum(rr) / len(rr)                          # fraction of image WIDTH
 
-        vis = []
-        for ang in rim_angles():
-            ok = []
-            for i, k in idx:
-                sp = _spans(P[i], k)
-                if sp is None:                       # a circle-tool read: the rim at this
-                    ok.append(circle_rim)            # angle was asserted, never observed
-                else:
-                    ok.append(_observed(ang, sp[0], sp[1]))
-            vis.append(2 if all(ok) else 0)
-        tools = sorted({p.get("tool", "circle") for p in P})
-        out.append({"cx": cx, "cy": cy, "R": R, "vis": vis, "W": W, "H": H,
-                    "n_reads": len(P), "tool": "+".join(tools)})
+        # Facing has to agree between the readers. It is derived from the order each of
+        # them marked A and P, so a mismatch means one has the two swapped -- and an
+        # anterior label sitting posteriorly is worse than no label at all.
+        face = {_at(P[i].get("facing"), k) for i, k in idx} - {""}
+        facing = face.pop() if len(face) == 1 else ""
+        conflict = len(face) > 0
+
+        lms, seen = {}, []
+        for role in ROLES:
+            got = [d["xy"] for i, k in idx
+                   for d in [(_lm(P[i], k).get(role) or {})]
+                   if d.get("src") == "obs" and d.get("xy")]
+            if got and len(got) == len(idx):           # every reader traced it
+                lms[role] = (sum(g[0] for g in got) / len(got),
+                             sum(g[1] for g in got) / len(got), 2)
+            elif got:                                  # one reader of two
+                lms[role] = (got[0][0], got[0][1], 1)
+            else:                                      # nobody could: place, do not train
+                v = _dir(role, facing)
+                lms[role] = ((cx + R * v[0], cy + R * (W / H) * v[1], 0) if v
+                             else (cx, cy, 0))
+            seen.append(lms[role][2])
+        tilt = [t for t in (_at(P[i].get("ap_tilt_deg"), k, None) for i, k in idx)
+                if t is not None]
+        out.append({"cx": cx, "cy": cy, "R": R, "lms": lms, "W": W, "H": H,
+                    "facing": facing, "facing_conflict": conflict,
+                    "n_obs": sum(1 for v in seen if v == 2),
+                    "n_reads": len(P), "ap_tilt": max(tilt) if tilt else None,
+                    "tool": "+".join(sorted({p.get("tool", "circle") for p in P}))})
     return out
 
 
 def yolo_line(inst: dict, pad: float = 1.25) -> str:
-    """`cls xc yc w h  (x y v) * (1 + RIM)`, all normalised, YOLO-Pose layout.
+    """`cls xc yc w h  (x y v) * 4`, all normalised, YOLO-Pose layout.
 
-    x is normalised by width and y by height, so the circle of radius R (a fraction of
-    WIDTH) becomes an ellipse in normalised space -- the aspect factor has to be applied
-    to every y or the rim points land off the cortex on a tall lateral.
+    Keypoints in a fixed order: centre, anterior, superior, posterior. The centre is always
+    v=2 -- derived rather than seen, but always determined, and it is the quantity the
+    study needs. The three extremes carry the visibility the readers actually earned.
     """
     W, H, R = inst["W"], inst["H"], inst["R"]
-    asp = W / H                                     # R is in width-fractions; y needs this
+    asp = W / H                                        # R is in width-fractions
     bw, bh = min(1.0, 2 * R * pad), min(1.0, 2 * R * asp * pad)
-    xc = min(1.0, max(0.0, inst["cx"]))
-    yc = min(1.0, max(0.0, inst["cy"]))
+    cl = lambda v: min(1.0, max(0.0, v))               # noqa: E731
+    xc, yc = cl(inst["cx"]), cl(inst["cy"])
     kp = [f"{xc:.6f} {yc:.6f} 2"]
-    for ang, v in zip(rim_angles(), inst["vis"]):
-        x = xc + R * math.cos(ang)
-        y = yc + R * asp * math.sin(ang)
+    for role in ROLES:
+        x, y, v = inst["lms"][role]
         inside = 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0
-        kp.append(f"{min(1.0, max(0.0, x)):.6f} {min(1.0, max(0.0, y)):.6f} "
-                  f"{v if inside else 0}")
+        kp.append(f"{cl(x):.6f} {cl(y):.6f} {v if inside else 0}")
     return f"0 {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f} " + " ".join(kp)
 
 
-DATA_YAML = """# Femoral head keypoints, derived from reader rim clicks.
+DATA_YAML = """# Femoral head keypoints.
 #
-# kpt 0 is the CENTRE and is derived, never clicked: it is not visible in the image.
-# kpts 1..{n} are the rim resampled at fixed clock angles, image directions, clockwise
-# from image-right. Visibility 0 means that angle fell OUTSIDE the arc the readers
-# actually marked -- it is extrapolation, and it is excluded from the loss on purpose.
+#   0 centre     DERIVED, never clicked. There is no edge at the centre of a femoral head
+#                -- it is inside bone -- so it is solved from the circle the extremes fit.
+#                It is what the study needs (the bicoxofemoral point is the midpoint of
+#                the two centres) but it is not a landmark.
+#   1 anterior   most anterior point of the articular surface  (cortex vertical there)
+#   2 superior   top of the head                               (cortex horizontal there)
+#   3 posterior  most posterior point                          (cortex vertical there)
 #
-# At inference, refit a circle to the predicted rim keypoints and prefer the FITTED
-# centre over the regressed one. The rim is observable; the centre is not.
+# The extremes are marked by readers rather than resampled off the fitted circle, because
+# an extreme is a TANGENCY CONDITION and so locally findable. Points partway round the rim
+# are not: a femoral head is rotationally symmetric, nothing in the image separates the rim
+# at 45 degrees from the rim at 50, and such a point is only definable once you already
+# have the centre -- i.e. it is the answer wearing a landmark's clothes.
+#
+# visibility 0 = NEITHER reader could trace that extreme. The position was placed from the
+# fitted circle and is excluded from the loss on purpose. 1 = one reader of two.
+#
+# At inference, fit a circle through the predicted extremes and prefer THAT centre over the
+# regressed one. Extremes that are not equidistant from the predicted centre are a free
+# reliability signal a bare centre regression cannot express.
 path: {path}
 train: images/train
 val: images/val
-kpt_shape: [{k}, 3]
-flip_idx: {flip}
+kpt_shape: [4, 3]
+# a horizontal flip exchanges anterior and posterior; centre and superior map to themselves
+flip_idx: [0, 3, 2, 1]
 names:
   0: femoral_head
 """
@@ -231,10 +275,9 @@ def main():
     ap.add_argument("--include-single", action="store_true",
                     help="also export films with only one read (default: two or none)")
     ap.add_argument("--circle-rim", action="store_true",
-                    help="treat circle-tool reads as rim evidence at every angle. OFF by "
-                         "default: that reader sized a circle, they did not assert that "
-                         "the cortex was traceable all the way round, and training on it "
-                         "teaches the model to hallucinate rim where none was seen.")
+                    help="unused placeholder kept so old invocations do not break: a "
+                         "circle-tool read names no extremes, so it can only ever "
+                         "contribute a centre.")
     a = ap.parse_args()
 
     cases = load_cases(a.ledger)
@@ -256,8 +299,12 @@ def main():
         (out / "labels" / split / f"{cid}.txt").write_text(
             "\n".join(yolo_line(i) for i in inst) + "\n")
         for i in inst:
-            vis_hist[sum(1 for v in i["vis"] if v)] += 1
+            vis_hist[i["n_obs"]] += 1
             tally[f"tool={i['tool']}"] += 1
+            if i["facing_conflict"]:
+                tally["FACING CONFLICT (readers disagree on A/P)"] += 1
+            if i["ap_tilt"] is not None and i["ap_tilt"] > 12:
+                tally["A/P tilt > 12 deg (non-spherical or swapped)"] += 1
         tally[f"{len(inst)} head(s)"] += 1
         kept += 1
         mid = None
@@ -267,20 +314,18 @@ def main():
         elif len(inst) == 1:
             mid = [inst[0]["cx"], inst[0]["cy"]]
         meta.append({"case": cid, "split": split, "heads": len(inst),
-                     "tool": inst[0]["tool"], "bicoxofemoral": mid})
+                     "tool": inst[0]["tool"], "facing": inst[0]["facing"],
+                     "observed_extremes": [i["n_obs"] for i in inst],
+                     "bicoxofemoral": mid})
         if a.images:
             src = next((p for p in Path(a.images).glob(f"{cid}.*")), None)
             if src:
                 shutil.copy2(src, out / "images" / split / src.name)
 
-    (out / "data.yaml").write_text(DATA_YAML.format(
-        n=RIM, path=str(out.resolve()), k=RIM + 1,
-        # a horizontal flip maps image-right rim to image-left: angle -> -angle.
-        # The centre maps to itself.
-        flip=[0] + [1 + ((RIM - i) % RIM) for i in range(RIM)]))
+    (out / "data.yaml").write_text(DATA_YAML.format(path=str(out.resolve())))
     (out / "manifest.json").write_text(json.dumps(
         {"ledger": a.ledger, "cases": len(cases), "exported": kept,
-         "rim_points": RIM, "circle_rim_as_evidence": a.circle_rim,
+         "keypoints": KP_NAMES,
          "bicoxofemoral_note": "derived, not a training target: it is the midpoint of the "
                                "fitted centres and is recorded here so the study quantity "
                                "survives alongside the detector labels.",
@@ -289,14 +334,14 @@ def main():
     print(f"  cases in ledger      {len(cases)}")
     print(f"  exported             {kept}")
     for k, v in tally.most_common():
-        print(f"      {k:24s} {v}")
-    print(f"\n  observed rim angles per head (of {RIM}):")
+        print(f"      {k:44s} {v}")
+    print("\n  extremes BOTH readers traced, per head (of 3):")
     for k in sorted(vis_hist):
         bar = "#" * min(40, vis_hist[k] * 40 // max(1, max(vis_hist.values())))
         print(f"      {k}: {vis_hist[k]:5d}  {bar}")
     if vis_hist and max(vis_hist) == 0:
-        print("\n  NOTE: no read carried an arc, so every rim point is extrapolated and "
-              "masked out.\n  Only the centre keypoint is trainable from this export.")
+        print("\n  NOTE: no read named any extreme, so only the centre keypoint is "
+              "trainable\n  from this export. Those are circle-tool reads.")
     print(f"\n  wrote {out}/ (labels, data.yaml, manifest.json)")
 
 

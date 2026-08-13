@@ -285,17 +285,11 @@ with sync_playwright() as p:
     pg.screenshot(path=str(SHOTS / "4_two_circles.png"))
     pg.screenshot(path=str(SHOTS / "3_marked.png"))
 
-    # ------------------------------------------------------------------ arc tool
-    # The centre of a femoral head is not visible -- no edge, no texture, it is inside
-    # the bone -- so the arc tool asks only for rim points and solves for the centre.
-    # What has to be true of that solve:
-    #   1. it recovers the centre exactly from points on a known circle;
-    #   2. it reports an error bar that is SMALL for a wide arc and LARGE for a shallow
-    #      one, even though BOTH have zero residual with three points. That is the whole
-    #      reason the tool exists: residuals cannot tell a good fit from a useless one
-    #      here, and a reader given only a crisp crosshair would never know.
-    aerrs = []
+    # Arc mode has its own suite -- test_arc.py -- which drives it on a synthetic film
+    # with a real cortex. This file stays the layout and PACS-mapping suite, on the
+    # circle primitive, and only checks that arc mode's script does not blow up.
     pgA = br.new_page(viewport=VIEW)
+    aerrs = []
     pgA.on("pageerror", lambda e: aerrs.append(str(e)))
     pgA.on("console", lambda m: aerrs.append(f"console.error: {m.text}")
            if m.type == "error" else None)
@@ -303,103 +297,15 @@ with sync_playwright() as p:
     pgA.evaluate("localStorage.setItem('hf_tok','alice')")
     pgA.reload(wait_until="networkidle")
     pgA.wait_for_function("document.getElementById('c').width > 0", timeout=20000)
-    pgA.wait_for_timeout(400)
+    pgA.wait_for_timeout(500)
     check(not aerrs, f"no JS errors in arc mode ({aerrs[:2]})")
-    check(pgA.eval_on_selector("#appui", "e => !e.hidden"),
-          "arc mode: the app became visible")
     check(pgA.evaluate("TOOL") == "arc", "?tool=arc selects the arc primitive")
     check(pgA.eval_on_selector("#btnhead", "e => e.offsetParent !== null"),
-          "the New head button is shown in arc mode")
-
-    def fit_from(deg, cx=700.0, cy=900.0, R=120.0):
-        """Fit a circle to points placed at known angles on a known circle."""
-        return pgA.evaluate(
-            """([deg,cx,cy,R]) => {
-                 arcs=[deg.map(d=>{const t=d*Math.PI/180;
-                   return [(cx+R*Math.cos(t))/img.width,(cy+R*Math.sin(t))/img.height];})];
-                 acur=0; refit(); draw(); readout();
-                 const f=fits[0];
-                 return f && {a:f.a,b:f.b,R:f.R,rms:f.rms,
-                              span:f.span*180/Math.PI, two:2*f.e1/img.width};
-               }""", [deg, cx, cy, R])
-
-    wide = fit_from([0, 120, 240])           # points right round the rim
-    shallow = fit_from([255, 270, 285])      # a 30-degree cap over the top only
-    print(f"       wide    {wide}")
-    print(f"       shallow {shallow}")
-    check(wide and abs(wide["a"] - 700) < 0.5 and abs(wide["b"] - 900) < 0.5
-          and abs(wide["R"] - 120) < 0.5,
-          f"3 spread points recover the centre exactly ({wide})")
-    check(shallow and abs(shallow["a"] - 700) < 0.5 and abs(shallow["b"] - 900) < 0.5,
-          "a 30-degree arc ALSO fits with zero residual -- residuals cannot catch it")
-    check(wide["rms"] < 1e-6 and shallow["rms"] < 1e-6,
-          f"both have zero residual ({wide['rms']:.2g}, {shallow['rms']:.2g})")
-    check(shallow["two"] > 4 * wide["two"],
-          f"but the shallow arc's error bar is far larger "
-          f"({wide['two']:.5f} -> {shallow['two']:.5f} of image width)")
-    check(wide["two"] <= 0.005 < shallow["two"],
-          f"and it straddles the 0.005 consensus tolerance -- wide passes, shallow does "
-          f"not ({wide['two']:.5f} vs {shallow['two']:.5f})")
-    check("shallow arc" in pgA.eval_on_selector("#fitread", "e => e.textContent")
-          and "bad" in pgA.eval_on_selector("#fitread", "e => e.className"),
-          "the header readout says so, in words and in colour")
-    pgA.screenshot(path=str(SHOTS / "5_arc_shallow.png"))
-    fit_from([0, 60, 120, 180, 240, 300])
-    pgA.wait_for_timeout(150)
-    check("good" in pgA.eval_on_selector("#fitread", "e => e.textContent"),
-          "and says good once the points go round the rim")
-    pgA.screenshot(path=str(SHOTS / "6_arc_good.png"))
-
-    # collinear clicks define no circle, and must not produce a confident centre
-    check(pgA.evaluate("""(()=>{ arcs=[[[0.4,0.30],[0.5,0.30],[0.6,0.30]]];
-                                 refit(); return fits[0]===null })()"""),
-          "three collinear points yield no fit rather than a wild one")
-
-    # real mouse: click points, drag one, start a second head
-    pgA.evaluate("arcs=[[]]; acur=0; fits=[]; draw(); readout()")
-    box = pgA.locator("#c").bounding_box()
-    spots = [(0.42, 0.30), (0.50, 0.26), (0.58, 0.30), (0.50, 0.36)]
-    for fx, fy in spots:
-        pgA.mouse.click(box["x"] + box["width"] * fx, box["y"] + box["height"] * fy)
-        pgA.wait_for_timeout(80)
-    check(pgA.evaluate("arcs[0].length") == 4, "four clicks make four rim points")
-    check(pgA.evaluate("fits[0] !== null"), "and they fit a circle")
-    p0 = pgA.evaluate("arcs[0][0].slice()")
-    c0 = pgA.evaluate("[fits[0].a, fits[0].b]")
-    dx0 = box["x"] + box["width"] * spots[0][0]
-    dy0 = box["y"] + box["height"] * spots[0][1]
-    pgA.mouse.move(dx0, dy0)
-    pgA.mouse.down()
-    pgA.mouse.move(dx0 - 25, dy0, steps=6)
-    pgA.mouse.up()
-    pgA.wait_for_timeout(200)
-    check(pgA.evaluate("arcs[0][0][0]") < p0[0], "a rim point can be dragged")
-    check(abs(pgA.evaluate("fits[0].a") - c0[0]) > 0.5,
-          "and the centre re-fits live when it moves")
-    pgA.keyboard.press("u")
-    pgA.wait_for_timeout(120)
-    check(pgA.evaluate("arcs[0].length") == 3, "u removes the last rim point")
-    pgA.keyboard.press("h")
-    pgA.wait_for_timeout(120)
-    check(pgA.evaluate("arcs.length") == 2 and pgA.evaluate("acur") == 1,
-          "h starts a second head")
-    pgA.keyboard.press("u")
-    pgA.wait_for_timeout(120)
-    check(pgA.evaluate("arcs.length") == 1,
-          "undo on an empty second head removes it rather than submitting a stub")
-
-    # the submission keeps the old shape AND carries the rim clicks
-    pgA.evaluate("""(()=>{ arcs=[[[0.45,0.30],[0.50,0.27],[0.55,0.30],[0.50,0.33]]];
-                           acur=0; refit(); draw(); })()""")
-    sent = []
-    pgA.on("request", lambda r: sent.append(r) if r.method == "POST"
-           and r.url.endswith("/submit") else None)
-    pgA.evaluate("send()")
-    pgA.wait_for_timeout(900)
-    body = sent[0].post_data if sent else ""
-    check("heads" in body and "arcs" in body and '"tool"' in body,
-          "the submission carries heads (unchanged), the raw arcs, and the tool used")
-    pgA.screenshot(path=str(SHOTS / "7_arc_marked.png"))
+          "arc-only controls are shown in arc mode")
+    check(pgA.eval_on_selector_all(".ifcircle",
+          "es => es.every(e => e.offsetParent === null)"),
+          "and the circle-tool instructions are hidden")
+    pgA.close()
     br.close()
 
 srv.should_exit = True

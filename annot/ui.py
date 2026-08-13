@@ -23,31 +23,94 @@ CRITERIA = """
 <aside id=guide>
  <div class=helpbody>
   <div class=helptext>
-   <p class=ifarc><b>What you are doing.</b> <b>Click three or more points around the rim
-   of the femoral head</b>, on the subchondral cortical arc. A circle is fitted to your
-   points as you go, and its <b>centre</b> is what we record. You never judge where the
-   middle is and you never size anything.</p>
+   <p class=ifarc><b>What you are doing.</b> Mark <b>three named points</b> on the femoral
+   head articular surface:</p>
+   <ol class="lmlist ifarc">
+    <li><b class=lmA>A &mdash; anterior extreme</b> <kbd>1</kbd>. The most anterior point of
+        the articular surface: where the cortex stops running forward and starts curving
+        back.</li>
+    <li><b class=lmS>S &mdash; superior extreme</b> <kbd>2</kbd>. The top of the head, where
+        the cortex is horizontal.</li>
+    <li><b class=lmP>P &mdash; posterior extreme</b> <kbd>3</kbd>. The mirror of A at the
+        back.</li>
+   </ol>
+   <p class=ifarc>A circle is fitted to them live and its <b>centre</b> is what the study
+   needs. You never judge where the middle is.</p>
 
-   <p class="cite ifarc"><b>Why points on the rim rather than the centre.</b> The centre of
-   the femoral head <i>is not visible</i>. There is no edge, no line and no texture there,
-   because it is inside the bone &mdash; every reader who clicks it is inferring it. The
-   rim is the opposite: the subchondral cortex is one of the sharpest edges on the film.
-   So we ask you only for what you can actually see and solve for what you cannot. The
-   head is very nearly a sphere, so its projection is a circle and the fit is exact rather
-   than an approximation. This is the Mose concentric-circle method with the circle
-   <i>solved for</i> instead of slid into place, and Legaye defines the hip axis through
-   the head <i>centres</i> treating the head as a sphere &mdash; so the fitted centre is
-   the published landmark itself, not a stand-in for it.</p>
+   <p class="cite ifarc"><b>There is no required order and nothing is locked in.</b> Click
+   points wherever the cortex is clear; the tool names them A, S, P as you go, purely as a
+   guess. <b>Click any point to select it and press <kbd>1</kbd>, <kbd>2</kbd> or
+   <kbd>3</kbd> to rename it</b>, or <kbd>0</kbd> to make it an ordinary rim point. Renaming
+   never deletes anything &mdash; whatever held that name becomes a rim point. If you would
+   rather mark first and name later, click five or six points and press <kbd>w</kbd>
+   (<b>Auto-name</b>): it works out which of <i>your</i> clicks are the three extremes from
+   the shape they fit. It never invents a point, and every name it picks is still
+   editable.</p>
 
-   <p class="warn ifarc"><b>Spread your points. This is the one thing that matters.</b>
-   Three points clustered along the top of the head fit a circle perfectly and still put
-   the centre in the wrong place, because a short arc barely constrains how <i>far away</i>
-   the centre is. Put points on the <b>medial and lateral edges &mdash; 9 o&rsquo;clock and
-   3 o&rsquo;clock</b>, the widest part of the head &mdash; and the vertical position of the
-   centre is pinned. The dashed ellipse drawn around the centre <b>is</b> that uncertainty:
-   <b>add points until it collapses to a dot.</b> If it will not collapse, the arc you can
-   see really is too short &mdash; press <kbd>f</kbd> to flag the film rather than forcing
-   it.</p>
+   <p class="cite ifarc"><b>Why these three and not just &ldquo;points on the rim&rdquo;.</b>
+   Because an <i>extreme</i> is something you can find, and a point partway round an arc is
+   not. At the anterior extreme the cortex is vertical; at the superior extreme it is
+   horizontal. Those are properties of the image at that spot, so two readers looking at
+   the same film are looking for the same thing. Anywhere else on a round head, one bit of
+   cortex is indistinguishable from the next, and &ldquo;the point a third of the way
+   round&rdquo; only means something once you already know where the centre is &mdash;
+   which is the thing we are trying to find.</p>
+
+   <p class="warn ifarc"><b>Three named points alone are usually not quite enough, so please
+   add a few more.</b> A, S and P are the points you can <i>name</i>; they are not the three
+   that pin a circle best. Marked perfectly they still leave the centre a little looser than
+   the agreement tolerance, and the header will say <b>widen</b> to tell you so. Two or three
+   extra clicks anywhere the cortex is clear &mdash; press nothing, just click &mdash; take
+   it to <b>good</b>. The names carry the anatomy; the extras carry the precision.</p>
+
+   <p class="cite ifarc"><b>Why not click the centre directly.</b> The hip point is not a
+   landmark. It is <i>derived</i> from landmarks, exactly like the centre of a vertebral
+   body &mdash; there is no edge at it, no line and no texture, because it is inside the
+   bone. Every reader who clicks it is inferring it, and no two readers infer identically.
+   The head is very nearly a sphere, so its projection is a circle and solving that circle
+   is exact rather than an approximation: this is the Mose concentric-circle method with
+   the circle solved for instead of slid into place. Legaye defines the hip axis through
+   the head <i>centres</i>, treating the head as a sphere, so the fitted centre is the
+   published landmark itself.</p>
+
+   <p class="warn ifarc"><b>Get A and P at the widest part.</b> Points crowded along the
+   top of the head fit a circle perfectly and still put the centre in the wrong place,
+   because a short arc barely constrains how <i>far away</i> the centre is. The dashed
+   dashed ellipse drawn around the centre <b>is</b> that uncertainty, at true scale. When
+   the marks are well spread it sits inside the crosshair; when they are bunched at the top
+   of the head it stretches into a vertical cigar <b>longer than the head itself</b>, in
+   red. Treat it as an alarm rather than a gauge &mdash; for the fine reading, the
+   <b>&plusmn;</b> figure in the header is the same quantity as a number, against the 0.005
+   tolerance. <b>If it will not settle, add rim points anywhere the cortex is clear.</b> If
+   it still will not, the arc you can see really is too short: press <kbd>f</kbd> to flag
+   the film rather than forcing it.</p>
+
+   <p class="warn ifarc"><b>The tool tells you whether you are on the cortex.</b> As you
+   move the cursor the header shows <b>edge&nbsp;NN%</b> &mdash; how strong a structural
+   edge sits under the pointer compared with the surrounding film. The subchondral cortex
+   is an edge; the dark joint space and the flat cancellous bone inside the head are not.
+   <b>Hunt with the cursor until the number is high, then click.</b> Above about 70% you
+   are on a structure; below 40% you are on flat film.<br>
+   If a mark you have already placed is not on an edge, an <b>arrow appears on it pointing
+   at the nearest better spot</b>, with the distance in pixels. Drag the point along the
+   arrow. Nothing moves on its own and nothing is blocked &mdash; it is a hint from the
+   pixels, and if it is pointing at the acetabular roof instead of the head, ignore it. Your
+   anatomy wins.</p>
+
+   <p class="cite ifarc"><b>Zoom the whole film, do not squint.</b> Scroll to zoom about the
+   cursor and <b>right-drag to pan</b>; both carry over to the next film, so you set your
+   working magnification once. There is no magnifier &mdash; a loupe covers the anatomy
+   beside the point you are placing, which is the part you need to see. At fit-to-window one
+   screen pixel is several pixels of film, so the display rather than your eye would set the
+   floor on how well two readers can agree. <b>Zoom in before you place anything.</b></p>
+
+   <p class="cite ifarc"><b>If one extreme is genuinely not traceable</b> &mdash; overlapped
+   by the other head, off the collimated field, lost in an overexposed corner &mdash; press
+   <kbd>k</kbd> for <b>Can&rsquo;t see it</b> instead of guessing. It is then computed from
+   the circle and drawn as a dashed square, and recorded as <i>not observed</i>. A guessed
+   landmark is worse than a missing one: it trains everything downstream to look for
+   something that was never there. You will need a few extra rim points to pin the circle
+   when you skip one.</p>
 
    <p class=ifcircle><b>What you are doing.</b> <b>Fit a circle to the femoral head.</b>
    Click to drop
@@ -74,23 +137,34 @@ CRITERIA = """
    <p><b>How to do it.</b></p>
    <ol class=ifarc>
     <li>Find the round dense head below and anterior to the S1 endplate, seated in the
-        acetabulum.</li>
+        acetabulum. <b>Anterior is the side the pubis and abdomen are on</b>; the sacrum
+        and the buttock are posterior. You do not need to know left from right &mdash;
+        that is unknowable on a lateral and nothing here asks for it.</li>
     <li><b>Zoom in first</b> (scroll). At fit-to-window one screen pixel is several pixels
         of film &mdash; close enough that the display, rather than your eye, would set the
         limit on how well two readers can agree.</li>
-    <li><b>Click a point on the subchondral cortical arc</b>, the thin dense line of the
-        articular surface. Match the <i>arc</i>, not the bright shadow: overlap with the
-        acetabulum puts the densest region <i>medial</i> to the true centre, and that
-        error is systematic, not noise.</li>
-    <li>Place at least three, <b>widest points first</b> &mdash; one at each side of the
-        head, then the top, then as many more as the cortex is clear for. There is no
-        limit and more is better.</li>
+    <li><b>Set which way the patient faces once</b>, with the <b>Faces</b> button or
+        <kbd>m</kbd>. It sticks to every film afterwards, so on a series shot the same way
+        you set it on the first film and never touch it again. It is what makes
+        &ldquo;anterior&rdquo; mean the same direction twice, and it lets the tool tell you
+        when A and P have gone the wrong way round.</li>
+    <li>Click points on the <b>subchondral cortical arc</b>, the thin dense line of the
+        articular surface. Follow the <i>arc</i>, not the bright shadow: overlap with the
+        acetabulum puts the densest region away from the true surface, and that error is
+        systematic, not noise.</li>
+    <li>Name three of them <b class=lmA>A</b>, <b class=lmS>S</b>, <b class=lmP>P</b>
+        &mdash; as you go, or afterwards, or with <kbd>w</kbd>. The header shows what is
+        still unnamed.</li>
+    <li>Then add <b>as many extra rim points as the cortex is clear for</b>. They are drawn
+        as small rings rather than labelled squares, they are not landmarks, and they exist
+        only to tighten the circle. More is always better.</li>
     <li><b>Drag any point</b> to correct it; the circle, the centre and the ellipse
-        re-fit live. <kbd>u</kbd> removes the last point.</li>
+        re-fit live. <kbd>u</kbd> removes the last point, and also undoes a
+        <b>Can&rsquo;t see it</b>.</li>
     <li>The fitted circle is drawn <b>solid where you gave it evidence and dashed where it
         is extrapolating</b>. A mostly-dashed circle is a warning, not a finished mark.</li>
-    <li>For a <b>second head</b>, press <kbd>h</kbd> (or New head) and mark it the same
-        way. <kbd>h</kbd> also switches back if you want to add points to the first.</li>
+    <li>For a <b>second head</b>, press <kbd>h</kbd> (or New head) and mark A, S and P on
+        it too. <kbd>h</kbd> also switches back if you want to add points to the first.</li>
     <li><b>Elsewhere the controls are a PACS.</b> Scroll zooms about the cursor,
         <b>left-drag</b> on bare film windows it (left-right contrast, up-down
         brightness), <b>right-drag</b> pans, <kbd>r</kbd> resets. A faint arc usually
@@ -237,7 +311,13 @@ STYLE = """
     and a header that re-wraps moves the film out from under the cursor. */
  #fitread{font-family:var(--mono);font-size:11.5px;min-width:30ch;display:inline-block;
           color:#8a94a0}
+ #qcread{font-family:var(--mono);font-size:11.5px;min-width:24ch;display:inline-block;
+         color:#8a94a0}
  #fitread b{font-variant-numeric:tabular-nums}
+ .lmlist{margin:4px 0 10px 18px;padding:0}
+ .lmlist li{margin:4px 0}
+ .lmA,.lmS,.lmP{font-variant-numeric:tabular-nums}
+ .lmA{color:#7cc4ff}.lmS{color:#00E5A0}.lmP{color:#f5a524}
  .ok{color:var(--lft)}.mid{color:var(--warn)}.bad{color:var(--rgt)}
  /* fixed width: this text changes on every scroll, and a header that
     re-wraps when it grows moves the film out from under the cursor. */
@@ -346,8 +426,16 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 <div id=appui hidden>
 <header>
   <button class=go onclick=load()>Next <kbd>n</kbd></button>
-  <span class=ifarc>click <b>3+ points on the rim</b> &middot; spread them wide &middot; drag to correct</span>
+  <span class=ifarc>click round the rim &middot; name them
+    <b class=lmA>A</b><kbd>1</kbd> <b class=lmS>S</b><kbd>2</kbd> <b class=lmP>P</b><kbd>3</kbd>
+    in any order</span>
   <span class=ifcircle>click to drop a circle &middot; hover it and <b>scroll</b> to size &middot; drag to nudge</span>
+  <button class="ghost ifarc" id=btnface onclick=toggleFace()
+    title="which way the patient faces on this film. Sticky — set it once and it carries to every film after. m">Faces &#9664; anterior left</button>
+  <button class="ghost ifarc" onclick=autoName()
+    title="name your existing clicks A/S/P from the shape of the circle they fit. Never adds a point; every name stays editable.">Auto-name <kbd>w</kbd></button>
+  <button class="ghost ifarc" id=btnskip onclick=skipRole()
+    title="this extreme cannot be traced — derive it from the circle and record it as unobserved">Can&rsquo;t see it <kbd>k</kbd></button>
   <button class="ghost ifarc" id=btnhead onclick=newHead()>New head <kbd>h</kbd></button>
   <button class=ghost onclick=undo()>Undo <kbd>u</kbd></button>
   <button class=go onclick=send()>Submit <kbd>&crarr;</kbd></button>
@@ -361,6 +449,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
   <button class=ghost onclick=toggleEx()>Example <kbd>x</kbd></button>
   <button class=ghost onclick=toggleTool()
     title="which primitive gives better agreement is an empirical question — the tool used is recorded on every read">Tool: <b id=toolname>arc</b></button>
+  <span id=qcread class=ifarc title="live edge strength under the cursor, ranked against the surrounding film. The subchondral cortex is a structural edge; flat joint space and flat cancellous bone are not. An arrow points at the nearest stronger edge within a nudge."></span>
   <span id=fitread class=ifarc title="how tightly your points constrain the centre. 2σ of the fitted centre, as a fraction of image width; the consensus tolerance is 0.005."></span>
   <span id=wl title="scroll = zoom · left-drag = window/level · right-drag = pan · click = mark · r = reset. Zoom and pan carry over to the next film."></span>
   <span id=who></span>
@@ -396,25 +485,104 @@ let guideOn=true, exOn=true;
    TWO ANNOTATION PRIMITIVES, and the ledger records which one produced each read.
 
      circle : drop a circle, scroll to size it            (the original)
-     arc    : click 3+ points on the rim, fit the circle
+     arc    : mark three NAMED extremes of the head, fit the circle
 
-   Arc exists because the centre of the femoral head IS NOT VISIBLE -- no edge, no
-   texture, it is inside the bone -- while the subchondral rim is one of the sharpest
-   edges on the film. Asking only for what can be seen and solving for what cannot also
-   yields a real uncertainty on the centre instead of a confident-looking guess, and the
-   rim clicks are themselves trainable landmarks in a way the centre is not.
+   The bicoxofemoral point is not a landmark. It is DERIVED from landmarks, the way the
+   centre of a vertebral body is -- there is no edge at it, no texture, no gradient,
+   because it is inside bone. So the reader marks landmarks and the centre is solved for.
 
-   Which one actually agrees better between readers is an empirical question, so the tool
-   is switchable and stamped into every submission rather than argued about.
+   The three are the anterior, superior and posterior extremes of the femoral head
+   articular surface. They are named rather than free clicks anywhere on the rim, and
+   that distinction is the whole point:
+
+     * an EXTREME is locally detectable. It is where the tangent to the cortex turns
+       vertical or horizontal -- a property of the image at that spot, findable without
+       already knowing the answer.
+     * a free rim click is not. On a rotationally symmetric arc nothing whatsoever
+       distinguishes the point at 45 degrees from the point at 50, so "the rim point at
+       45 degrees" can only be defined once you have the centre. Asking a detector to
+       find one is asking it to regress an inferred quantity in disguise.
+
+   They are well spread -- anterior and posterior sit at the widest part of the head,
+   level with the centre -- but they are NOT the best-conditioned three points on a
+   circle. Three points 120 degrees apart are, and A/S/P at 9, 12 and 3 o'clock come out
+   about half again worse. That is the price of using landmarks a reader can actually
+   find, and it is why extra rim points are asked for rather than merely tolerated: the
+   three names carry the identity, the extras carry the precision.
+
+   Extra rim points are welcome and tighten the fit. They are not landmarks and are not
+   exported as keypoints -- they are evidence, not targets.
+
+   Which primitive actually agrees better between readers is an empirical question, so
+   both stay available and the tool is stamped into every submission.
 --------------------------------------------------------------------------- */
 let TOOL='arc';
 try{ TOOL = new URLSearchParams(location.search).get('tool')
           || localStorage.getItem('annot_tool') || 'arc'; }catch(e){}
 if(TOOL!=='circle') TOOL='arc';
 
-// arcs[k] = the rim clicks for head k, as fractions of image width/height. There is
-// always at least one arc -- possibly empty -- and acur is the one being added to.
-let arcs=[[]], acur=0, fits=[];
+const ROLES=['A','S','P'];
+// WHICH WAY THE PATIENT FACES, asserted once and then sticky.
+//
+// "Anterior" is a direction on a lateral, not a side of the image, and if it is not
+// carried through then every A/P label in the export is a coin flip -- the exact failure
+// naming the landmarks was meant to prevent. An earlier version inferred it from the
+// order the reader clicked A and P, which worked but forced them to mark in a fixed
+// order and gave the tool no way to check them. Asking for it outright is one control,
+// it is obvious from the film, it is almost always the same for a whole series, and it
+// lets the tool CATCH a swapped pair instead of faithfully recording it.
+let FACE='left';
+try{ FACE = localStorage.getItem('annot_face')==='right' ? 'right' : 'left'; }catch(e){}
+function toggleFace(){
+  FACE = FACE==='left' ? 'right' : 'left';
+  try{localStorage.setItem('annot_face',FACE)}catch(e){}
+  showFace(); refit(); draw(); readout();
+}
+function showFace(){
+  const b=$('btnface'); if(!b) return;
+  b.innerHTML = FACE==='left' ? 'Faces &#9664; anterior left'
+                              : 'anterior right &#9654; Faces';
+}
+// The image direction anterior points in, and the unit vector to each extreme.
+const antSign = ()=> FACE==='left' ? -1 : 1;
+function roleDir(r){
+  if(r==='S') return [0,-1];
+  return [(r==='A' ? antSign() : -antSign()), 0];
+}
+const ROLE_NAME={A:'ANTERIOR extreme', S:'SUPERIOR extreme', P:'POSTERIOR extreme', '':'extra rim point'};
+// HD[k] = one femoral head:
+//   pts  [{x,y,role}]  in placement order, role '' for an extra rim point
+//   skip {A,S,P}       an extreme the reader could not see; derived from the fit instead
+let HD=[{pts:[], skip:{}}], acur=0, fits=[], sel2=null;   // sel2 = {arc,i} selected point
+const newHd=()=>({pts:[], skip:{}});
+// The landmark the next click will become: the first of A,S,P neither placed nor skipped,
+// then '' for extras. This is a SUGGESTION, never a constraint -- see relabel().
+function nextRole(h){
+  for(const r of ROLES) if(!h.skip[r] && !h.pts.some(p=>p.role===r)) return r;
+  return '';
+}
+const roleAt=(h,r)=>h.pts.find(p=>p.role===r) || null;
+// NOTHING IS LOCKED IN. Any point can be renamed to any role at any time, in any order,
+// and the previous holder of that role becomes an ordinary rim point rather than being
+// deleted. A reader who marks four points and only then decides which is the anterior
+// extreme is working normally; a tool that forces A-then-S-then-P makes them undo their
+// way backwards to fix a label, which is how you train people to submit a wrong one.
+function relabel(r, target){
+  if(TOOL!=='arc') return;
+  const t = target || sel2 || (HD[acur].pts.length
+              ? {arc:acur, i:HD[acur].pts.length-1} : null);
+  if(!t){ msg('click a point first, then press '+(r||'e')+' to name it'); return; }
+  const h=HD[t.arc], p=h.pts[t.i];
+  if(r && p.role!==r){
+    const prev=h.pts.find(q=>q.role===r);
+    if(prev) prev.role='';                    // demoted, not discarded
+    delete h.skip[r];                         // naming it un-skips it
+  }
+  p.role = r;
+  acur=t.arc; sel2={arc:t.arc, i:t.i};
+  refit(); draw(); readout();
+  msg(r ? ('that point is now the '+ROLE_NAME[r]) : 'that point is now an extra rim point');
+}
 // Assumed click noise, as a fraction of image width. With exactly three points the
 // residuals are ZERO by construction, so residual-based error bars would report a perfect
 // centre on a 20-degree arc -- precisely the case this is meant to catch. Propagating a
@@ -427,6 +595,132 @@ const SIG0 = 0.003;
 // The consensus tolerance the pair of reads is scored against, so the readout is in the
 // units that decide whether this film needs adjudication.
 const TOL = 0.005;
+
+/* ---------------------------------------------------------------------------
+   PLACEMENT QC: is this click actually ON the cortex?
+
+   The failure mode is specific and common: the reader lands in the dark joint space or in
+   flat cancellous bone a few pixels off the cortical line, and nothing on screen says so.
+   At working zoom that error is invisible and it is systematic, which is the worst kind.
+
+   The test is EDGE STRENGTH, not brightness. The subchondral cortex is a structural
+   boundary, so it is a gradient ridge whichever way the film is displayed -- and reads
+   the same on an inverted film, where a brightness test would be exactly backwards. Flat
+   dark joint space and flat cancellous bone both score low, which is the distinction that
+   matters. It is a HINT computed from pixels, not a truth: the reader's anatomy always
+   wins, and nothing here blocks a submission.
+
+   Sobel over the whole film once, then every probe is a disc of array reads.
+--------------------------------------------------------------------------- */
+let LUM=null, GRAD=null, GMAX=null, QCW=0, QCH=0, qcReady=false;
+function buildQC(){
+  qcReady=false; LUM=null; GRAD=null; GMAX=null;
+  if(!img.width) return;
+  const w=img.width, h=img.height;
+  let dat;
+  try{
+    const oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+    const og=oc.getContext('2d',{willReadFrequently:true});
+    og.drawImage(img,0,0);
+    dat=og.getImageData(0,0,w,h).data;
+  }catch(err){ return; }        // tainted canvas: QC stays off rather than lying
+  const lum=new Uint8Array(w*h);
+  for(let i=0,p=0;i<lum.length;i++,p+=4)
+    lum[i]=(dat[p]*299+dat[p+1]*587+dat[p+2]*114)/1000;
+  const g=new Uint8Array(w*h);
+  for(let y=1;y<h-1;y++){
+    const r0=(y-1)*w, r1=y*w, r2=(y+1)*w;
+    for(let x=1;x<w-1;x++){
+      const gx=(lum[r0+x+1]+2*lum[r1+x+1]+lum[r2+x+1])
+              -(lum[r0+x-1]+2*lum[r1+x-1]+lum[r2+x-1]);
+      const gy=(lum[r2+x-1]+2*lum[r2+x]+lum[r2+x+1])
+              -(lum[r0+x-1]+2*lum[r0+x]+lum[r0+x+1]);
+      const m=Math.sqrt(gx*gx+gy*gy)/4;
+      g[r1+x]= m>255 ? 255 : m;
+    }
+  }
+  // separable max filter: the plateau that makes the whole cortical band score alike
+  const rd=Math.max(2, Math.round(w*0.0025)), tmp=new Uint8Array(w*h), mx=new Uint8Array(w*h);
+  for(let y=0;y<h;y++){
+    const row=y*w;
+    for(let x=0;x<w;x++){
+      let m=0, x0=x-rd<0?0:x-rd, x1=x+rd>=w?w-1:x+rd;
+      for(let i=x0;i<=x1;i++) if(g[row+i]>m) m=g[row+i];
+      tmp[row+x]=m;
+    }
+  }
+  for(let x=0;x<w;x++){
+    for(let y=0;y<h;y++){
+      let m=0, y0=y-rd<0?0:y-rd, y1=y+rd>=h?h-1:y+rd;
+      for(let j=y0;j<=y1;j++) if(tmp[j*w+x]>m) m=tmp[j*w+x];
+      mx[y*w+x]=m;
+    }
+  }
+  // the noise floor: the median of the dilated gradient, which in any radiograph is
+  // dominated by the large smooth areas rather than by the few edges
+  const hist=new Uint32Array(256);
+  for(let i=0;i<mx.length;i++) hist[mx[i]]++;
+  let acc=0; QNOISE=0;
+  for(let v=0;v<256;v++){ acc+=hist[v]; if(acc>=mx.length/2){ QNOISE=v; break; } }
+  LUM=lum; GRAD=g; GMAX=mx; QCW=w; QCH=h; qcReady=true;
+}
+const QC_R1=()=>Math.max(4, Math.round(QCW*0.007));   // how far a nudge may be suggested
+const QC_R2=()=>Math.max(9, Math.round(QCW*0.020));   // what counts as "nearby structure"
+const _gm=(x,y)=>GMAX[y*QCW+x];
+
+/* The score is a RATIO anchored on the film's own noise floor, not a rank.
+
+   Ranking the spot against its neighbourhood was tried first and is quietly broken: in a
+   flat region every pixel ties, so the rank is decided by sensor noise and a click in the
+   middle of featureless cancellous bone came back at 60% -- indistinguishable from the
+   cortex. Worse, the rank depended on how much cortex happened to fall inside the
+   sampling disc, so the same anatomy scored differently at different points along it.
+
+   What the reader is asking is absolute: "is there real structure here, or am I on flat
+   film?". So the answer is measured between two references from the film itself -- its
+   noise floor, and the strongest structure within reach:
+
+       0%   = indistinguishable from noise
+       100% = as strong as the best edge anywhere nearby
+
+   If there is no structure nearby at all, there is nothing to be near and the answer is
+   0 rather than a meaningless 100. */
+let QNOISE=0;
+function qcAt(pxf, pyf){
+  if(!qcReady) return null;
+  const x=Math.round(pxf), y=Math.round(pyf);
+  const r1=QC_R1(), r2=QC_R2();
+  if(x<r2+3||y<r2+3||x>=QCW-r2-3||y>=QCH-r2-3) return null;
+  const here=_gm(x,y);
+  let hi=0, bx=x, by=y, bv=here;
+  for(let dy=-r2;dy<=r2;dy++){
+    for(let dx=-r2;dx<=r2;dx++){
+      const d2=dx*dx+dy*dy;
+      if(d2>r2*r2) continue;
+      const v=_gm(x+dx,y+dy);
+      if(v>hi) hi=v;
+      if(d2<=r1*r1 && v>bv){ bv=v; bx=x+dx; by=y+dy; }
+    }
+  }
+  const span=hi-QNOISE;
+  // Nothing within reach stands out from the noise: say so instead of ranking noise
+  // against noise and returning a confident number.
+  if(span < Math.max(6, QNOISE*0.8))
+    return {pct:0, dx:0, dy:0, bpct:0, d:0, flat:true};
+  const sc=v => Math.max(0, Math.min(100, Math.round(100*(v-QNOISE)/span)));
+  const pct=sc(here), bp=sc(bv);
+  // DEADBAND. The score is normalised against the strongest structure within reach, so
+  // there is almost always SOME pixel a little stronger -- rim cortex varies by a few
+  // percent along its length from noise and resampling alone. Without this, a click dead
+  // on the cortex still gets an arrow telling it to move, and a hint that fires when the
+  // reader is already right is worse than no hint: they stop believing it.
+  if(pct>=QC_GOOD || bp-pct < 15)
+    return {pct:pct, dx:0, dy:0, bpct:pct, d:0, flat:false};
+  return {pct:pct, dx:bx-x, dy:by-y, bpct:bp,
+          d:Math.round(Math.hypot(bx-x,by-y)), flat:false};
+}
+const QC_GOOD=70, QC_WEAK=40;
+const qcClass=q => !q ? '' : (q.pct>=QC_GOOD ? 'ok' : (q.pct>=QC_WEAK ? 'mid' : 'bad'));
 
 function solve3(M, v){                       // Gaussian elimination, partial pivoting
   const A=[[M[0][0],M[0][1],M[0][2],v[0]],
@@ -526,9 +820,28 @@ function fitCircle(P){
           e1: Math.sqrt(l1), e2: Math.sqrt(l2), eang: ang};
 }
 function refit(){
-  if(!img.width){ fits = arcs.map(()=>null); return; }
-  fits = arcs.map(A => A.length>=3 ? fitCircle(A.map(p=>[p[0]*img.width, p[1]*img.height]))
-                                   : null);
+  if(!img.width){ fits = HD.map(()=>null); return; }
+  // every mark carries its own placement score, recomputed as it is dragged
+  HD.forEach(h=>h.pts.forEach(p=>{ p.qc = qcAt(p.x*img.width, p.y*img.height); }));
+  fits = HD.map(h => h.pts.length>=3
+    ? fitCircle(h.pts.map(p=>[p.x*img.width, p.y*img.height])) : null);
+  // Which way the patient faces, read off the two extremes rather than asked for. On a
+  // lateral this is the only thing that makes "anterior" mean the same direction twice.
+  fits.forEach((f,k)=>{
+    if(!f) return;
+    const a=roleAt(HD[k],'A'), p=roleAt(HD[k],'P');
+    f.facing = FACE;
+    // A congruent spherical head puts the anterior and posterior extremes at the SAME
+    // height, level with the centre. A large tilt between them is either a mislabelled
+    // pair or a head that is not spherical -- dysplasia, migration, arthritic collapse --
+    // and both are worth surfacing rather than averaging away.
+    f.aptilt = (a&&p)
+      ? Math.abs(Math.atan2((p.y-a.y)*img.height, (p.x-a.x)*img.width))*180/Math.PI : null;
+    // Now that facing is asserted, a swapped pair is CATCHABLE: the anterior extreme has
+    // to sit on the anterior side of the fitted centre. Silently recording a swap would
+    // put an anterior label on posterior cortex in the training set.
+    f.swapped = !!(a && p && (a.x - p.x) * antSign() < 0);
+  });
 }
 // The header readout, in the units the consensus test actually uses: 2 sigma of the
 // fitted centre as a fraction of image width, against the 0.005 tolerance. A reader who
@@ -537,23 +850,68 @@ function readout(){
   const el=$('fitread'); if(!el) return;
   if(TOOL!=='arc'){ el.textContent=''; return; }
   const bits=[];
-  let worst=0, any=false;
-  arcs.forEach((A,k)=>{
+  let worst=0, any=false, tilt=0;
+  HD.forEach((h,k)=>{
     const f=fits[k];
-    if(!A.length) return;
-    if(!f){ bits.push((k+1)+': '+A.length+' pt'+(A.length===1?'':'s')+' (need 3)');
+    if(!h.pts.length) return;
+    if(!f){ bits.push((k+1)+': '+h.pts.length+' pt'+(h.pts.length===1?'':'s')+' (need 3)');
             worst=Infinity; return; }
     any=true;
     const two=2*f.e1/img.width;
     worst=Math.max(worst, two);
-    bits.push((k+1)+': '+f.n+' pts  '+Math.round(f.span*180/Math.PI)+'\\u00b0  \\u00b1'
-              +two.toFixed(4));
+    if(f.aptilt!==null) tilt=Math.max(tilt, f.aptilt);
+    const named=ROLES.filter(r=>roleAt(h,r)).join('');
+    bits.push((k+1)+': '+(named||'-')+(h.pts.length>named.length
+                 ? '+'+(h.pts.length-named.length) : '')
+              +'  \\u00b1'+two.toFixed(4));
   });
-  if(!bits.length){ el.className='ifarc'; el.textContent='fit: no points yet'; return; }
-  const cls = !any||worst>2*TOL ? 'bad' : (worst>TOL ? 'mid' : 'ok');
-  const tag = !any ? '' : (worst>2*TOL ? '  shallow arc' : (worst>TOL ? '  widen' : '  good'));
+  if(!bits.length){
+    el.className='ifarc';
+    el.textContent='mark the '+ROLE_NAME[nextRole(HD[acur])];
+    return;
+  }
+  // how many marks are actually sitting on a structural edge
+  const all=HD.flatMap(h=>h.pts).filter(p=>p.qc);
+  const onc=all.filter(p=>p.qc.pct>=QC_GOOD).length;
+  const qcbit = all.length ? '   cortex '+onc+'/'+all.length : '';
+  let cls = !any||worst>2*TOL ? 'bad' : (worst>TOL ? 'mid' : 'ok');
+  let tag = !any ? '' : (worst>2*TOL ? '  shallow' : (worst>TOL ? '  widen' : '  good'));
+  // 12 degrees is about a head-radius/10 offset between the two extremes: past that it is
+  // not click noise.
+  if(tilt>12){ tag += '  A/P tilt '+Math.round(tilt)+'\\u00b0';
+               if(cls==='ok') cls='mid'; }
+  if(fits.some(f=>f&&f.swapped)){ tag += '  A/P LOOK SWAPPED'; cls='bad'; }
+  if(all.length && onc<all.length && cls==='ok') cls='mid';
   el.className='ifarc '+cls;
-  el.textContent='fit '+bits.join('   ')+tag;
+  el.textContent=bits.join('   ')+qcbit+tag;
+}
+// Name the reader's existing clicks from the shape of what they drew. It never invents a
+// point -- it only decides which of the ones already on screen are the extremes, which is
+// the tedious part -- and every assignment stays editable afterwards.
+function autoName(){
+  if(TOOL!=='arc')return;
+  const h=HD[acur], f=fits[acur];
+  if(!f){ msg('mark at least 3 points first'); return; }
+  const used=new Set();
+  ROLES.forEach(r=>{
+    if(h.skip[r]) return;
+    const d=roleDir(r);
+    let best=-1, bestc=-2;
+    h.pts.forEach((p,i)=>{
+      if(used.has(i)) return;
+      const vx=(p.x*img.width-f.a)/f.R, vy=(p.y*img.height-f.b)/f.R;
+      const n=Math.hypot(vx,vy)||1, c=(vx*d[0]+vy*d[1])/n;
+      if(c>bestc){ bestc=c; best=i; }
+    });
+    // 0.5 is 60 degrees off the extreme. Naming a point further away than that would be
+    // asserting an extreme the reader never went near.
+    if(best>=0 && bestc>0.5){ used.add(best); h.pts.forEach(p=>{ if(p.role===r) p.role=''; });
+                              h.pts[best].role=r; }
+  });
+  refit(); draw(); readout();
+  const got=ROLES.filter(r=>roleAt(h,r));
+  msg(got.length===3 ? 'named A, S and P from the shape — correct any that are wrong'
+      : 'named '+(got.join('')||'nothing')+' — no click was close enough for the rest');
 }
 // Windowing and zoom, PACS-style. The loupe this replaces was covering the anatomy
 // beside the point being placed, which is the one thing you need to see.
@@ -609,7 +967,7 @@ async function boot(){
 }
 async function start(){
   $('gate').hidden=true; $('appui').hidden=false;
-  applyTool();
+  applyTool(); showFace();
   try{ toggleGuide(localStorage.getItem('annot_guide')!=='0');
        toggleEx(localStorage.getItem('annot_ex')!=='0'); }catch(e){}
   // click any example to open it full size in a tab
@@ -642,7 +1000,7 @@ function progress(p){
 }
 async function load(){
   if(busy)return; busy=true;
-  circles=[]; sel=-1; arcs=[[]]; acur=0; fits=[]; readout();
+  circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null; sel2=null; readout();
   const t0=performance.now();
   try{
     const r=await fetch('/next',{headers:H()});
@@ -660,6 +1018,9 @@ async function load(){
     img=new Image();
     img.onload=()=>{C.width=img.width;C.height=img.height;showWL();fit();
                   refit();draw();readout();restorePan();
+      // after first paint: the reader is orienting, and a Sobel pass over a 3 MP film
+      // costs tens of milliseconds that must not sit in front of the image appearing
+      setTimeout(()=>{buildQC(); refit(); draw(); readout();}, 0);
       msg(cur.case_id+'  slot '+cur.slot+'  ('+Math.round(performance.now()-t0)+' ms)');
       nextId=null;nextImg=null;prefetch();};
     if(src){img.src=src}
@@ -694,7 +1055,7 @@ function draw(){
   X.drawImage(img,0,0);
   X.filter='none';
   const lw=Math.max(1.5, img.width/700);
-  if(TOOL==='arc'){ drawArcs(lw); return; }
+  if(TOOL==='arc'){ drawArcs(); return; }
   circles.forEach((c,i)=>{
     // 1st / 2nd circle, NOT left/right -- a lateral cannot tell you which is which
     X.strokeStyle = i===0 ? '#00E5A0' : '#FF3B30';
@@ -723,18 +1084,80 @@ function draw(){
   }
 }
 const COL=['#00E5A0','#FF3B30'];      // 1st / 2nd head. NOT left/right -- see heads().
-function drawArcs(lw){
+// Marks are sized in SCREEN pixels, not image pixels.
+//
+// The canvas is drawn at the film's native size and then CSS-scaled, so anything sized in
+// image pixels grows with the zoom: at 4x a marker becomes a blob covering the cortex it
+// is marking, and at fit-to-window the same marker is too small to grab. Dividing by the
+// display scale keeps every mark the same size under the reader's eye at every zoom,
+// which is what makes zooming in to work actually usable.
+// unit vector from the fitted centre out through a mark, for placing its label clear of
+// the anatomy. Falls back to straight up before there is a fit to point away from.
+function outward(f,x,y){
+  if(!f) return [0,-1];
+  const dx=x-f.a, dy=y-f.b, L=Math.hypot(dx,dy);
+  return L<1e-6 ? [0,-1] : [dx/L, dy/L];
+}
+function drawArcs(){
+  const bb=C.getBoundingClientRect();
+  const k = bb.width>1 ? img.width/bb.width : 1;      // image px per screen px
+  const lw=1.7*k, rr=5*k, fs=13*k, xh=7*k;
   const ctr=[];
-  arcs.forEach((A,k)=>{
-    const col=COL[k%2], f=fits[k], active=(k===acur);
-    // the rim clicks themselves, always visible and always on top of the fit
-    A.forEach((p,i)=>{
-      const x=p[0]*img.width, y=p[1]*img.height, rr=Math.max(2.5, lw*1.8);
-      X.strokeStyle=col; X.lineWidth=lw*0.9;
-      X.beginPath(); X.arc(x,y,rr,0,7); X.stroke();
+  HD.forEach((h,kk)=>{
+    const col=COL[kk%2], f=fits[kk], active=(kk===acur);
+    // The marks, always on top of the fit. Named landmarks are drawn as labelled squares
+    // and extras as small rings, so a reader can see at a glance which of their clicks
+    // are the three that get exported and which are only feeding the circle.
+    h.pts.forEach((p,i)=>{
+      const x=p.x*img.width, y=p.y*img.height;
+      // the selected point, which 1/2/3 will rename
+      if(sel2 && sel2.arc===kk && sel2.i===i){
+        X.strokeStyle='#fff'; X.lineWidth=lw*0.8; X.globalAlpha=0.9;
+        X.beginPath(); X.arc(x,y,rr*2.4,0,7); X.stroke(); X.globalAlpha=1;
+      }
+      X.strokeStyle=col; X.lineWidth=lw;
+      if(p.role){
+        X.strokeRect(x-rr, y-rr, rr*2, rr*2);
+        // The letter sits RADIALLY OUTWARD from the centre, so it never covers the
+        // cortex it is labelling -- always above S, out to the side for A and P.
+        const o=outward(f,x,y);
+        // dark halo behind the letter: it has to stay readable over bright cortex as
+        // well as over dark joint space, and it sits on both
+        X.font='bold '+fs+'px system-ui';
+        X.textAlign='center'; X.textBaseline='middle';
+        X.lineWidth=fs*0.28; X.strokeStyle='rgba(0,0,0,.85)';
+        X.strokeText(p.role, x+o[0]*rr*2.8, y+o[1]*rr*2.8);
+        X.fillStyle=col; X.fillText(p.role, x+o[0]*rr*2.8, y+o[1]*rr*2.8);
+        X.lineWidth=lw; X.strokeStyle=col;
+      } else {
+        X.beginPath(); X.arc(x,y,rr*0.75,0,7); X.stroke();
+      }
       X.fillStyle=col; X.globalAlpha=0.55;
       X.beginPath(); X.arc(x,y,rr*0.45,0,7); X.fill();
       X.globalAlpha=1;
+      // PLACEMENT HINT. A mark that is not on an edge gets an arrow to the nearest spot
+      // that is, so the correction is a glance and a drag rather than a hunt. Nothing is
+      // moved automatically -- the reader decides whether the arrow is pointing at the
+      // cortex or at some other structure that happens to have an edge.
+      const q=p.qc;
+      if(q && q.pct<QC_GOOD && (q.dx||q.dy)){
+        X.strokeStyle = q.pct<QC_WEAK ? '#FF3B30' : '#f5a524';
+        X.lineWidth=lw*1.1;
+        const L=Math.hypot(q.dx,q.dy)||1, ux=q.dx/L, uy=q.dy/L;
+        // the arrow is drawn at the TRUE offset, so its length is the distance the reader
+        // has to move -- a hint that exaggerated the gap would be its own error
+        const x0=x+ux*rr*1.6, y0=y+uy*rr*1.6;
+        const x1=x+q.dx, y1=y+q.dy;
+        X.beginPath(); X.moveTo(x0,y0); X.lineTo(x1,y1); X.stroke();
+        const ah=5*k;
+        X.beginPath();
+        X.moveTo(x1,y1);
+        X.lineTo(x1-ah*(ux*0.87-uy*0.5), y1-ah*(uy*0.87+ux*0.5));
+        X.moveTo(x1,y1);
+        X.lineTo(x1-ah*(ux*0.87+uy*0.5), y1-ah*(uy*0.87-ux*0.5));
+        X.stroke();
+        X.beginPath(); X.arc(x,y,rr*1.7,0,7); X.stroke();
+      }
     });
     if(!f) return;
     // SOLID where the reader gave evidence, DASHED where the circle is extrapolating.
@@ -744,23 +1167,40 @@ function drawArcs(lw){
     X.setLineDash([lw*3,lw*4]); X.globalAlpha=0.6;
     X.beginPath(); X.arc(f.a,f.b,f.R,f.hi,f.lo+2*Math.PI); X.stroke();
     X.setLineDash([]); X.globalAlpha=1;
-    // the derived centre -- the thing we are actually collecting
-    const t=Math.max(6, f.R*0.28);
-    X.lineWidth=lw*1.2;
+    // the derived centre -- the thing we are actually collecting. Deliberately SMALL:
+    // it used to be sized off the head radius, which drew a 26 px cross over a 10 px
+    // uncertainty ellipse and hid the one number the reader is supposed to react to.
+    const t=xh;
+    X.lineWidth=lw*1.3;
     X.beginPath(); X.moveTo(f.a-t,f.b); X.lineTo(f.a+t,f.b);
     X.moveTo(f.a,f.b-t); X.lineTo(f.a,f.b+t); X.stroke();
     // ...and how well it is pinned. 2 sigma, so the ellipse is the region the centre
     // could plausibly be in. On a wide arc it collapses inside the crosshair; on a
     // superior-only arc it stretches into a long radial cigar, which is the truth.
-    X.setLineDash([lw*2,lw*2]); X.lineWidth=lw*0.9;
+    X.setLineDash([lw*2,lw*2]); X.lineWidth=lw*1.1;
     X.strokeStyle = 2*f.e1/img.width > 2*TOL ? '#FF3B30'
                   : (2*f.e1/img.width > TOL ? '#f5a524' : col);
     X.beginPath();
-    X.ellipse(f.a, f.b, Math.max(1,2*f.e1), Math.max(1,2*f.e2), f.eang, 0, 7);
+    X.ellipse(f.a, f.b, Math.max(1.5*k,2*f.e1), Math.max(1.5*k,2*f.e2), f.eang, 0, 7);
     X.stroke(); X.setLineDash([]);
-    if(active && arcs.length>1){                 // which arc the next click joins
+    // An extreme the reader could not see is derived from the fit and drawn hollow, so it
+    // is obvious on the film which of the three are evidence and which are inference.
+    ROLES.forEach(r=>{
+      if(!h.skip[r] || !f) return;
+      const d=roleDir(r);
+      const x=f.a+f.R*d[0], y=f.b+f.R*d[1];
+      X.strokeStyle=col; X.globalAlpha=0.5; X.setLineDash([lw*1.5,lw*2]); X.lineWidth=lw;
+      X.strokeRect(x-rr, y-rr, rr*2, rr*2);
+      X.font='italic '+fs+'px system-ui';
+      X.textAlign='center'; X.textBaseline='middle';
+      X.lineWidth=fs*0.28; X.strokeStyle='rgba(0,0,0,.85)'; X.setLineDash([]);
+      X.strokeText(r, x+d[0]*rr*2.8, y+d[1]*rr*2.8);
+      X.fillStyle=col; X.fillText(r, x+d[0]*rr*2.8, y+d[1]*rr*2.8);
+      X.globalAlpha=1;
+    });
+    if(active && HD.length>1){                   // which head the next click joins
       X.strokeStyle=col; X.globalAlpha=0.35; X.lineWidth=lw*0.8;
-      X.beginPath(); X.arc(f.a,f.b,f.R*1.22,0,7); X.stroke(); X.globalAlpha=1;
+      X.beginPath(); X.arc(f.a,f.b,f.R+6*k,0,7); X.stroke(); X.globalAlpha=1;
     }
     ctr.push([f.a,f.b]);
   });
@@ -817,9 +1257,9 @@ function hit(p){
 function hitPt(e){
   const r=C.getBoundingClientRect(), sx=r.width/img.width, sy=r.height/img.height;
   const p=at(e);
-  for(let k=arcs.length-1;k>=0;k--){
-    for(let i=arcs[k].length-1;i>=0;i--){
-      const dx=(p[0]-arcs[k][i][0])*img.width*sx, dy=(p[1]-arcs[k][i][1])*img.height*sy;
+  for(let k=HD.length-1;k>=0;k--){
+    for(let i=HD[k].pts.length-1;i>=0;i--){
+      const dx=(p[0]-HD[k].pts[i].x)*img.width*sx, dy=(p[1]-HD[k].pts[i].y)*img.height*sy;
       if(Math.hypot(dx,dy) <= 11) return {arc:k, i:i};
     }
   }
@@ -851,10 +1291,10 @@ C.addEventListener('pointerdown',e=>{
   const pt=(TOOL==='arc' && e.button===0) ? hitPt(e) : null;
   const i=(TOOL!=='arc' && e.button===0) ? hit(p) : -1;
   if(i>=0) sel=i;
-  if(pt) acur=pt.arc;                     // grabbing a point makes its head the active one
+  if(pt){ acur=pt.arc; sel2={arc:pt.arc, i:pt.i}; }   // grabbing a point selects it
   drag={x:e.clientX, y:e.clientY, b:gainB, c:gainC, moved:0, btn:e.button,
         circle:i, cx:i>=0?circles[i][0]:0, cy:i>=0?circles[i][1]:0,
-        pt:pt, px:pt?arcs[pt.arc][pt.i][0]:0, py:pt?arcs[pt.arc][pt.i][1]:0,
+        pt:pt, px:pt?HD[pt.arc].pts[pt.i].x:0, py:pt?HD[pt.arc].pts[pt.i].y:0,
         sl:st.scrollLeft, stp:st.scrollTop};
   try{ C.setPointerCapture(e.pointerId); }catch(err){}
   if(i>=0||pt) draw();
@@ -873,8 +1313,8 @@ C.addEventListener('pointermove',e=>{
   if(drag.pt){                              // drag a rim click; everything re-fits live
     if(drag.moved < DRAG_MIN) return;
     const r=C.getBoundingClientRect();
-    arcs[drag.pt.arc][drag.pt.i][0]=clamp(drag.px + dx/r.width, 0, 1);
-    arcs[drag.pt.arc][drag.pt.i][1]=clamp(drag.py + dy/r.height, 0, 1);
+    HD[drag.pt.arc].pts[drag.pt.i].x=clamp(drag.px + dx/r.width, 0, 1);
+    HD[drag.pt.arc].pts[drag.pt.i].y=clamp(drag.py + dy/r.height, 0, 1);
     refit(); draw(); readout();
     return;
   }
@@ -898,6 +1338,36 @@ C.addEventListener('pointerup',e=>{
   // a click on empty film drops a mark; a click on an existing one just selects it
   if(d.moved < DRAG_MIN && d.btn === 0 && d.circle < 0 && !d.pt) place(e);
 });
+/* LIVE HOVER PROBE. The reader can find the cortex BEFORE committing a click, which is
+   the difference between a QC that scolds and one that helps.
+
+   Deliberately text-only: it never redraws the film. A full redraw on every mousemove
+   would repaint a 3 MP image through a brightness/contrast filter, and the pointer lag
+   that produces is exactly the thing that makes an annotation tool horrible to use. The
+   probe itself is a couple of thousand array reads. */
+const ARROWS=['\\u2192','\\u2198','\\u2193','\\u2199','\\u2190','\\u2196','\\u2191','\\u2197'];
+let hoverRAF=0;
+function hoverProbe(e){
+  const el=$('qcread'); if(!el) return;
+  if(TOOL!=='arc' || !img.width){ el.textContent=''; return; }
+  if(!qcReady){ el.className='ifarc'; el.textContent='reading film\\u2026'; return; }
+  const p=at(e);
+  const q=qcAt(p[0]*img.width, p[1]*img.height);
+  if(!q){ el.className='ifarc'; el.textContent=''; return; }
+  let t='edge '+q.pct+'%';
+  if(q.pct<QC_GOOD && (q.dx||q.dy)){
+    const a=ARROWS[(Math.round(Math.atan2(q.dy,q.dx)/(Math.PI/4))+8)%8];
+    t += '   '+a+' '+q.d+'px \\u2192 '+q.bpct+'%';
+  } else if(q.pct>=QC_GOOD){ t += '  on cortex'; }
+  el.className='ifarc '+qcClass(q);
+  el.textContent=t;
+}
+C.addEventListener('pointermove',e=>{
+  if(drag) return;                         // dragging has its own, heavier, path
+  if(hoverRAF) return;
+  hoverRAF=requestAnimationFrame(()=>{ hoverRAF=0; hoverProbe(e); });
+});
+C.addEventListener('pointerleave',()=>{ const el=$('qcread'); if(el) el.textContent=''; });
 C.addEventListener('pointercancel',()=>{drag=null});
 C.addEventListener('contextmenu',e=>e.preventDefault());   // right-drag is panning
 
@@ -905,8 +1375,14 @@ function place(e){
   if(!img.width)return;
   const p=at(e);
   if(TOOL==='arc'){
-    arcs[acur].push([p[0], p[1]]);
+    const h=HD[acur], r=nextRole(h);
+    h.pts.push({x:p[0], y:p[1], role:r});
+    sel2={arc:acur, i:h.pts.length-1};
     refit(); draw(); readout();
+    const nx=nextRole(h);
+    msg(!r ? (h.pts.length+' points on head '+(acur+1))
+        : nx ? (ROLE_NAME[r]+' marked \\u2014 now the '+ROLE_NAME[nx])
+             : 'all three marked \\u2014 add rim points to tighten it, or Submit');
     return;
   }
   if(circles.length>=2)return;
@@ -916,25 +1392,44 @@ function place(e){
 }
 function undo(){
   if(TOOL==='arc'){
-    if(arcs[acur].length) arcs[acur].pop();
-    // an emptied second arc is removed rather than left as a stub that submits as a head
-    else if(acur>0){ arcs.splice(acur,1); acur=arcs.length-1; }
-    refit(); draw(); readout();
+    const h=HD[acur];
+    // A skip is a decision too, and it is invisible on the film, so it has to be
+    // undoable -- otherwise a mis-keyed skip permanently downgrades a landmark that the
+    // reader could actually see.
+    const lastSkip=ROLES.filter(r=>h.skip[r]).pop();
+    if(h.pts.length) h.pts.pop();
+    else if(lastSkip) delete h.skip[lastSkip];
+    // an emptied second head is removed rather than left as a stub that submits as a head
+    else if(acur>0){ HD.splice(acur,1); acur=HD.length-1; }
+    sel2=null; refit(); draw(); readout();
     return;
   }
   circles.pop(); sel=circles.length-1; draw();
+}
+// An extreme that genuinely cannot be traced. It is derived from the fitted circle and
+// exported as NOT observed, so the film is still usable for the centre without teaching a
+// detector to find a landmark that was never visible.
+function skipRole(){
+  if(TOOL!=='arc')return;
+  const h=HD[acur], r=nextRole(h);
+  if(!r){ msg('all three extremes are already marked'); return; }
+  h.skip[r]=true;
+  refit(); draw(); readout();
+  const nx=nextRole(h);
+  msg(ROLE_NAME[r]+' skipped \\u2014 it will be derived'
+      + (nx ? '. Now the '+ROLE_NAME[nx] : '. Add rim points so the circle is determined'));
 }
 // h starts a second head, and thereafter switches between them -- a reader who spots a
 // missed piece of the first rim after starting the second should not have to undo to it.
 function newHead(){
   if(TOOL!=='arc')return;
-  if(arcs.length<2){
-    if(arcs[acur].length<3){ msg('finish this head first — 3 points minimum'); return; }
-    arcs.push([]); acur=1;
+  if(HD.length<2){
+    if(HD[acur].pts.length<3){ msg('finish this head first — 3 points minimum'); return; }
+    HD.push(newHd()); acur=1;
   } else {
-    acur=(acur+1)%arcs.length;
+    acur=(acur+1)%HD.length;
   }
-  msg('marking head '+(acur+1));
+  msg('head '+(acur+1)+' \\u2014 mark the '+ROLE_NAME[nextRole(HD[acur])]);
   draw(); readout();
 }
 function applyTool(){
@@ -945,7 +1440,7 @@ function applyTool(){
 function toggleTool(){
   TOOL = (TOOL==='arc') ? 'circle' : 'arc';
   try{localStorage.setItem('annot_tool',TOOL)}catch(e){}
-  circles=[]; sel=-1; arcs=[[]]; acur=0; fits=[];
+  circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[];
   applyTool(); draw(); readout();
   msg('tool: '+TOOL+' — marks cleared');
 }
@@ -974,23 +1469,49 @@ async function send(){
   if(!cur){return}
   let payload;
   if(TOOL==='arc'){
-    const used=arcs.filter(A=>A.length>0);
-    if(!used.length){msg('click 3+ points on a femoral head rim, or use Not visible');return}
-    if(used.some(A=>A.length<3)){
-      msg('a head needs at least 3 rim points — add them or press u to remove it');return}
-    if(fits.filter((f,k)=>arcs[k].length).some(f=>!f)){
+    const use=HD.map((h,k)=>({h:h,f:fits[k]})).filter(u=>u.h.pts.length>0);
+    if(!use.length){msg('mark the anterior, superior and posterior extremes, or Not visible');return}
+    if(use.some(u=>u.h.pts.length<3)){
+      msg('a head needs at least 3 points — add them or press u to remove it');return}
+    if(use.some(u=>!u.f)){
       msg('those points do not define a circle — spread them around the rim');return}
-    const F=fits.filter(Boolean);
+    // Every extreme has to be accounted for: marked, or explicitly skipped. Submitting
+    // with one silently unfilled would export a landmark that was never decided on.
+    const open=use.map(u=>ROLES.filter(r=>!roleAt(u.h,r) && !u.h.skip[r])).flat();
+    if(open.length){
+      msg('still to mark: '+open.map(r=>ROLE_NAME[r]).join(', ')
+          +' — or press k if it cannot be seen');return}
+    const F=use.map(u=>u.f);
     // heads = the FITTED centres, unordered, in exactly the shape the circle tool sent --
     // so agreement, adjudication and the board keep working untouched.
     //
-    // arcs = the raw rim clicks. They are kept because they are the only part of this a
-    // detector can be trained on directly: the centre is not an image feature, the rim
-    // is. Discarding them would throw away the trainable half of every read.
+    // landmarks = the three NAMED extremes, the only part of this a detector can be
+    // trained on directly. The centre is not an image feature; an extreme is. Each is
+    // either a click ("obs") or derived from the fit because the reader could not see it
+    // ("derived") -- and that distinction is what stops a training set from teaching a
+    // model to find rim that was never visible.
+    //
+    // facing is recorded because "anterior" is a direction on a lateral, not a side of
+    // the image, and it varies between films. Without it every A/P label in the export
+    // would be a coin flip.
     payload={tool:'arc',
              heads:F.map(f=>[f.a/img.width, f.b/img.height]),
              radii:F.map(f=>f.R/img.width),
-             arcs:used.map(A=>A.map(p=>[+p[0].toFixed(5), +p[1].toFixed(5)])),
+             landmarks:use.map(u=>{
+               const o={};
+               ROLES.forEach(r=>{
+                 const p=roleAt(u.h,r);
+                 o[r]= p ? {xy:[+p.x.toFixed(5), +p.y.toFixed(5)], src:'obs'}
+                         : {src:'derived'};
+               });
+               return o;
+             }),
+             facing:F.map(()=>FACE),
+             ap_swapped:F.map(f=>!!f.swapped),
+             ap_tilt_deg:F.map(f=>f.aptilt===null?null:+f.aptilt.toFixed(1)),
+             // extra rim points: evidence for the fit, never keypoint targets
+             extra:use.map(u=>u.h.pts.filter(p=>!p.role)
+                                 .map(p=>[+p.x.toFixed(5), +p.y.toFixed(5)])),
              // observed angular interval per head, in radians, image coordinates: which
              // part of each circle is evidence and which part is extrapolation.
              arc_lo:F.map(f=>+f.lo.toFixed(4)),
@@ -1056,6 +1577,23 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='x')toggleEx();
   else if(e.key==='f')flagIt();
   else if(e.key==='h')newHead();
+  else if(e.key==='k')skipRole();
+  // 1/2/3 rename the selected point A/S/P, 0 demotes it to an extra rim point. This is
+  // what makes the order free: mark whatever you can see, decide the names afterwards.
+  //
+  // Digits rather than the obvious a/s/p because p is Pass and always has been. Rebinding
+  // a destructive key that readers already have in their fingers, so that a new frequent
+  // key could have a nicer mnemonic, is how you get films passed by accident. a and s are
+  // free and work as aliases; there is deliberately no p alias.
+  else if(e.key==='1')relabel('A');
+  else if(e.key==='2')relabel('S');
+  else if(e.key==='3')relabel('P');
+  else if(e.key==='0')relabel('');
+  else if(e.key==='a')relabel('A');
+  else if(e.key==='s')relabel('S');
+  else if(e.key==='e')relabel('');
+  else if(e.key==='w')autoName();
+  else if(e.key==='m')toggleFace();
 });
 window.addEventListener('resize', fit);
 // The header wraps as its contents change, which moves #stage without firing a window
