@@ -87,10 +87,18 @@ CRITERIA = """
    position of the centre is fixed by two points at once, but its <i>up-and-down</i>
    position rests on S almost alone &mdash; which is why the uncertainty ellipse comes out
    as a vertical cigar. Two more clicks near the top barely help (11% tighter). <b>One click
-   on the inferior margin cuts it by 42%</b>, and does better than three perfectly spaced
-   points. The header names the part of the rim that would help most; click there. If the
-   inferior margin is buried under the acetabular shadow, spread the extras as far from
-   your existing three as the cortex allows.</p>
+   low on the rim, below and in front of the head, cuts it by about a third.</b> The header
+   names the part of the rim that would help most on <i>this</i> film, and it only ever
+   names somewhere the cortex is actually visible &mdash; click there.</p>
+
+   <p class="cite ifarc"><b>Why there is no fourth landmark at the bottom of the head.</b>
+   Geometrically the best possible fourth point is the very bottom, at 6 o&rsquo;clock. It
+   is not available: that is where the head merges into the <b>neck</b>, so the bottom of
+   the sphere lies <i>inside bone</i> with no edge to trace. Measured on the segmented CT,
+   the femur continues outward past the head there on both sides. The lowest rim you can
+   actually see is <b>below and anterior</b>, and a point there buys nearly the same
+   tightening &mdash; which is why it is a rim point you place where you can see it, and
+   not a fourth named landmark you would have to guess at.</p>
 
    <p class="cite ifarc"><b>How much is enough is still being calibrated.</b> The
    <b>&plusmn;</b> figure assumes a click is accurate to about 0.3% of the film width. That
@@ -936,9 +944,22 @@ function bestNextAngle(P, f){
     return tr/2 + Math.sqrt(Math.max(0, tr*tr/4 - (cxx*cyy-cxy*cxy)));
   };
   const now=score(null);
+  // Conditioning alone picks the INFERIOR POLE every time, and on a femoral head that is
+  // the worst possible advice: the head merges into the neck there, so the sphere's
+  // 6 o'clock point sits INSIDE bone with no edge to find. Measured on the segmented CT,
+  // femur continues outward past the sphere at 6 o'clock on both heads, while the
+  // infero-anterior arc is free -- and a point there buys almost the same tightening.
+  //
+  // So a candidate has to be BOTH: it must tighten the fit, and the cortex has to be
+  // visible where it is being suggested, on this film, measured. If nothing satisfies
+  // both, say nothing rather than send a reader hunting for bone that is not there.
   let best=null, bv=Infinity;
-  for(let i=0;i<24;i++){ const t=i*Math.PI/12, v=score(t); if(v<bv){ bv=v; best=t; } }
-  // only worth saying if it is a real improvement, not a rounding one
+  for(let i=0;i<24;i++){
+    const t=i*Math.PI/12, v=score(t);
+    if(v>=bv) continue;
+    const q=qcAt(f.a+f.R*Math.cos(t), f.b+f.R*Math.sin(t));
+    if(q && !q.flat && q.pct>=QC_WEAK){ bv=v; best=t; }
+  }
   return (best!==null && bv < now*0.8) ? best : null;
 }
 // The rim named the way a reader thinks about it, which depends on which way the patient

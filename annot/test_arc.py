@@ -87,6 +87,7 @@ def rim(deg):
 
 from playwright.sync_api import sync_playwright                 # noqa: E402
 
+QC_WEAK = 40          # mirrors ui.py; the hint must clear it
 VIEW = {"width": 1600, "height": 900}
 with sync_playwright() as p:
     br = p.chromium.launch(headless="--headed" not in sys.argv)
@@ -183,8 +184,46 @@ with sync_playwright() as p:
     pg.wait_for_timeout(150)
     tag = pg.eval_on_selector("#fitread", "e => e.textContent")
     print(f"       header advice: {tag!r}")
-    check("add a point" in tag and "inferior" in tag,
-          "so the header names the inferior margin rather than asking for more of the same")
+    check("add a point" in tag,
+          "so the header names a part of the rim rather than asking for more of the same")
+    # THE HINT MUST NEVER POINT AT BONE THAT IS NOT THERE. Conditioning alone always picks
+    # the inferior pole, and on a femoral head that is inside the neck -- measured on the
+    # segmented CT, femur continues outward past the sphere at 6 o'clock. So the suggested
+    # angle has to have visible cortex on this film.
+    hint = pg.evaluate("""() => {
+        const t = bestNextAngle(HD[0].pts, fits[0]);
+        if (t === null) return null;
+        const q = qcAt(fits[0].a + fits[0].R*Math.cos(t),
+                       fits[0].b + fits[0].R*Math.sin(t));
+        return {deg: Math.round(((t*180/Math.PI)%360+360)%360),
+                edge: q ? q.pct : null, name: rimName(t)};
+      }""")
+    print(f"       hint: {hint}")
+    check(hint is not None and hint["edge"] is not None and hint["edge"] >= QC_WEAK,
+          f"the suggested spot has visible cortex on this film ({hint})")
+    check(hint["deg"] == 90,
+          "on a film whose whole rim is visible it does name the inferior pole, which is "
+          "the geometric optimum")
+    # Now take the inferior rim away, which is what a real femoral neck does to a real
+    # head. The hint must MOVE rather than keep naming bone that is no longer there.
+    moved = pg.evaluate("""() => {
+        const f=fits[0], saved=[];
+        const px=Math.round(f.a), py=Math.round(f.b+f.R), rad=Math.round(f.R*0.45);
+        for(let dy=-rad; dy<=rad; dy++) for(let dx=-rad; dx<=rad; dx++){
+          if(dx*dx+dy*dy>rad*rad) continue;
+          const i=(py+dy)*QCW+(px+dx);
+          saved.push([i, GMAX[i]]); GMAX[i]=QNOISE;
+        }
+        const t=bestNextAngle(HD[0].pts, fits[0]);
+        saved.forEach(([i,v])=>{GMAX[i]=v;});
+        return t===null ? null : {deg: Math.round(((t*180/Math.PI)%360+360)%360),
+                                  name: rimName(t)};
+      }""")
+    print(f"       with the inferior rim hidden: {moved}")
+    check(moved is not None and moved["deg"] != 90,
+          f"with the inferior rim hidden the hint moves off it ({moved})")
+    check(moved is not None and 45 <= moved["deg"] <= 135,
+          f"to the low rim on one side or the other, not back up to the top ({moved})")
 
     print("\n[3] placement QC finds the cortex")
     # A profile straight through the cortex at 12 o'clock. Positive d is into the head,
