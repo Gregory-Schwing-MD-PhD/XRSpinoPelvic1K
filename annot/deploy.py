@@ -28,7 +28,13 @@ def main() -> int:
     # now needs PRO, so this default is not a preference, it is the one that exists. The
     # ledger and image DATASET repos below are separate and keep their own names.
     ap.add_argument("--space", default="gregoryschwingmdphd/spinesurg-ct-annotator")
-    ap.add_argument("--annot-repo", default="gregoryschwingmdphd/xrsp-femhead-annot")
+    # The LIVE ledger, and this default is load-bearing: deploy.py writes ANNOT_REPO on
+    # every run, so a stale default here silently points the Space back at whatever it
+    # used to read. That happened -- a routine redeploy reverted the Space to the finished
+    # circle-tool ledger and readers got "nothing left to annotate" again. Whenever the
+    # live ledger changes, change it HERE, not only in the Space settings.
+    ap.add_argument("--annot-repo",
+                    default="gregoryschwingmdphd/xrsp-femhead-asp-pilot")
     ap.add_argument("--image-repo", default="gregoryschwingmdphd/xrsp-femhead-images")
     ap.add_argument("--adjudicators", default="gregoryschwingmdphd")
     ap.add_argument("--private", action="store_true",

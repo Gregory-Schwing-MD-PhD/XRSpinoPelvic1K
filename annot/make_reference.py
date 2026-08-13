@@ -52,7 +52,14 @@ OUT = pathlib.Path(__file__).with_name("reference_femhead.png")
 GREEN, RED, AMBER, WHITE = (0, 229, 160), (255, 59, 48), (245, 165, 36), (245, 245, 245)
 LMCOL = {"A": (124, 196, 255), "S": (0, 229, 160), "P": (245, 165, 36)}
 PANEL_H = 620
-YAW_DEG = 8.0          # enough to separate the heads by about one head radius
+# 12 degrees, not 8. At 8 the circles overlapped through their centres and the two
+# inner landmarks collided with the midpoint marker -- a figure about telling two heads
+# apart should not itself be ambiguous. 186 mm of head separation x sin(12 deg) = 39 mm,
+# about 1.7 head radii, which is an ordinary amount of rotation on a real lateral.
+# 8 degrees. 186 mm of head separation x sin(8) = 26 mm, about 1.1 head radii, which is
+# an ordinary amount of rotation on a lateral and enough that the two heads are plainly
+# two. Rendering this volume takes minutes, so the result is cached beside this file.
+YAW_DEG = 8.0
 
 
 def font(sz):
@@ -183,6 +190,16 @@ def plan_for_saved(seg, affine, spacing):
         np.asarray(cranial, float)
 
 
+def _tone(arr):
+    """Percentile stretch, so a freshly rendered panel sits beside the site's exported
+    PNG without looking like a different modality. The export went through its own tone
+    curve; matching by eye across panels is what makes the figure read as one figure."""
+    a = np.asarray(arr, float)
+    lo, hi = np.percentile(a[a > 0], 1.0), np.percentile(a, 99.5)
+    a = np.clip((a - lo) / max(hi - lo, 1e-6), 0, 1)
+    return Image.fromarray((a * 255).astype(np.uint8)).convert("RGB")
+
+
 def render(seg, ct, affine, yaw_deg=0.0, spacing=0.35, cache=True):
     """A DRR along the bicoxofemoral axis, optionally yawed off it.
 
@@ -199,8 +216,7 @@ def render(seg, ct, affine, yaw_deg=0.0, spacing=0.35, cache=True):
         plan = json.loads(str(z["plan"]))
         plan["image"] = z["image"]
         print(f"  reused cached {yaw_deg:g}-degree render ({cf.name})")
-        return (plan, Image.fromarray((np.clip(plan["image"], 0, 1) * 255)
-                                      .astype(np.uint8)).convert("RGB"),
+        return (plan, _tone(plan["image"]),
                 np.asarray(plan["origin_world_mm"], float),
                 np.asarray(plan["axes"]["anterior"], float),
                 np.asarray(plan["axes"]["cranial"], float))
@@ -227,16 +243,22 @@ def render(seg, ct, affine, yaw_deg=0.0, spacing=0.35, cache=True):
     origin = np.asarray(plan["origin_world_mm"], float)
     ant = np.asarray(plan["axes"]["anterior"], float)
     cranial = np.asarray(plan["axes"]["cranial"], float)
-    img = (np.clip(plan["image"], 0, 1) * 255).astype(np.uint8)
-    return plan, Image.fromarray(img).convert("RGB"), origin, ant, cranial
+    return plan, _tone(plan["image"]), origin, ant, cranial
 
 
 # ── drawing ─────────────────────────────────────────────────────────────────────
-def draw_head(dr, lm, scale, off, col_centre=AMBER, tag=True, lw=3):
-    """The three landmarks, the circle through them, and the derived centre."""
+def draw_head(dr, lm, scale, off, col_centre=AMBER, tag=True, lw=3,
+              ring=(140, 200, 255), lift=False):
+    """The three landmarks, the circle through them, and the derived centre.
+
+    `lift` puts the A and P letters ABOVE their squares instead of straight out to the
+    side. With two heads side by side the side-placed letters run into each other and
+    into the midpoint marker, which is a poor look for the panel whose whole job is
+    telling two heads apart.
+    """
     P = {k: ((v[0] - off[0]) * scale, (v[1] - off[1]) * scale) for k, v in lm.items()}
     (cx, cy), R = circumcircle(P["A"], P["S"], P["P"])
-    dr.ellipse([cx - R, cy - R, cx + R, cy + R], outline=(140, 200, 255), width=2)
+    dr.ellipse([cx - R, cy - R, cx + R, cy + R], outline=ring, width=2)
     for k in ("A", "S", "P"):
         x, y = P[k]
         s = 7
@@ -244,7 +266,11 @@ def draw_head(dr, lm, scale, off, col_centre=AMBER, tag=True, lw=3):
         if tag:
             ox, oy = (x - cx), (y - cy)
             n = np.hypot(ox, oy) or 1
-            label(dr, (x + ox / n * 26, y + oy / n * 26), k, LMCOL[k], 19, "mm")
+            if lift and k != "S":
+                dx, dy = ox / n * 20, -26
+            else:
+                dx, dy = ox / n * 26, oy / n * 26
+            label(dr, (x + dx, y + dy), k, LMCOL[k], 19, "mm")
     t = 16
     dr.line([cx - t, cy, cx + t, cy], fill=col_centre, width=3)
     dr.line([cx, cy - t, cx, cy + t], fill=col_centre, width=3)
@@ -335,13 +361,13 @@ def main():
     ZC = PANEL_H / cropC.height
     Cp = cropC.resize((round(cropC.width * ZC), PANEL_H), Image.LANCZOS)
     dC = ImageDraw.Draw(Cp)
-    c1, _ = draw_head(dC, lmL, ZC, (boxC[0], boxC[1]), tag=True, lw=3)
-    c2, _ = draw_head(dC, lmR, ZC, (boxC[0], boxC[1]), tag=True, lw=3)
+    c1, R1 = draw_head(dC, lmL, ZC, (boxC[0], boxC[1]), lift=True, ring=(120, 235, 190))
+    c2, _ = draw_head(dC, lmR, ZC, (boxC[0], boxC[1]), lift=True, ring=(255, 150, 140))
     dC.line([c1[0], c1[1], c2[0], c2[1]], fill=GREEN, width=3)
     m = ((c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2)
     dC.ellipse([m[0] - 7, m[1] - 7, m[0] + 7, m[1] + 7], fill=GREEN)
     label(dC, (10, 10), "C  two heads: mark BOTH", WHITE, 18)
-    label(dC, (m[0], m[1] + 46), "midpoint — derived for you", GREEN, 15, "ms")
+    label(dC, (m[0], m[1] + R1 + 34), "midpoint — derived for you", GREEN, 15, "ms")
     label(dC, (10, 528),
           f"the SAME scan, projected {YAW_DEG:.0f}° off the\n"
           "hip axis. real separation, not drawn in.\n"
