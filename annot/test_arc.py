@@ -162,6 +162,30 @@ with sync_playwright() as p:
     check(extras["two"] <= 0.005,
           f"and A/S/P plus three extras clears the tolerance ({extras['two']:.5f})")
 
+    # Pure geometry -- these RATIOS hold whatever the per-click noise actually is, so they
+    # are the defensible half of the "add more points" advice. The absolute numbers are
+    # not: they scale with an assumed sigma that this pilot exists to measure.
+    asp = fit_at([180, 270, 0])
+    sup2 = fit_at([180, 270, 0, 225, 315])       # two more, bunched superiorly
+    inf1 = fit_at([180, 270, 0, 90])             # ONE more, at the inferior margin
+    print(f"       A/S/P {asp['two']:.5f}   +2 superior {sup2['two']:.5f}   "
+          f"+1 inferior {inf1['two']:.5f}")
+    check(abs(asp["two"] / even["two"] - 1.5) < 0.02,
+          f"A/S/P is exactly 1.5x looser than three evenly spaced points "
+          f"({asp['two'] / even['two']:.3f}x) -- geometry, not an assumption")
+    check(sup2["two"] > 0.85 * asp["two"],
+          f"TWO extra points bunched superiorly barely help "
+          f"({sup2['two'] / asp['two']:.2f}x) -- 'add a few more anywhere' was wrong")
+    check(inf1["two"] < 0.6 * asp["two"] and inf1["two"] < even["two"],
+          f"but ONE at the inferior margin beats even the ideal triple "
+          f"({inf1['two'] / asp['two']:.2f}x)")
+    fit_at([180, 270, 0])
+    pg.wait_for_timeout(150)
+    tag = pg.eval_on_selector("#fitread", "e => e.textContent")
+    print(f"       header advice: {tag!r}")
+    check("add a point" in tag and "inferior" in tag,
+          "so the header names the inferior margin rather than asking for more of the same")
+
     print("\n[3] placement QC finds the cortex")
     # A profile straight through the cortex at 12 o'clock. Positive d is into the head,
     # negative is out into the joint space; both are wrong places to click and the crest

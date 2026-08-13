@@ -56,12 +56,23 @@ CRITERIA = """
    round&rdquo; only means something once you already know where the centre is &mdash;
    which is the thing we are trying to find.</p>
 
-   <p class="warn ifarc"><b>Three named points alone are usually not quite enough, so please
-   add a few more.</b> A, S and P are the points you can <i>name</i>; they are not the three
-   that pin a circle best. Marked perfectly they still leave the centre a little looser than
-   the agreement tolerance, and the header will say <b>widen</b> to tell you so. Two or three
-   extra clicks anywhere the cortex is clear &mdash; press nothing, just click &mdash; take
-   it to <b>good</b>. The names carry the anatomy; the extras carry the precision.</p>
+   <p class="warn ifarc"><b>Add points away from A, S and P &mdash; and where matters more
+   than how many.</b> A, S and P are the points you can <i>name</i>; they are not the three
+   that pin a circle best. With A and P at the sides and S on top, the <i>side-to-side</i>
+   position of the centre is fixed by two points at once, but its <i>up-and-down</i>
+   position rests on S almost alone &mdash; which is why the uncertainty ellipse comes out
+   as a vertical cigar. Two more clicks near the top barely help (11% tighter). <b>One click
+   on the inferior margin cuts it by 42%</b>, and does better than three perfectly spaced
+   points. The header names the part of the rim that would help most; click there. If the
+   inferior margin is buried under the acetabular shadow, spread the extras as far from
+   your existing three as the cortex allows.</p>
+
+   <p class="cite ifarc"><b>How much is enough is still being calibrated.</b> The
+   <b>&plusmn;</b> figure assumes a click is accurate to about 0.3% of the film width. That
+   is an estimate, not a measurement &mdash; it is the number this pilot exists to pin down.
+   If you are more precise than that, the tool is being pessimistic and A, S and P alone
+   would already be inside tolerance. Until then, treat <b>widen</b> as a nudge rather than
+   a verdict, and do not hunt for extra points on cortex you cannot actually see.</p>
 
    <p class="cite ifarc"><b>Why not click the centre directly.</b> The hip point is not a
    landmark. It is <i>derived</i> from landmarks, exactly like the centre of a vertebral
@@ -819,6 +830,51 @@ function fitCircle(P){
           sb: Math.sqrt(Math.max(0,cyy)),
           e1: Math.sqrt(l1), e2: Math.sqrt(l2), eang: ang};
 }
+/* WHERE an extra point would help, scored rather than guessed.
+
+   Extra clicks are NOT equally useful, and saying "add a few more anywhere" was wrong.
+   Starting from A/S/P, two more points on the superior rim buy 11%; ONE point at the
+   inferior margin buys 42%, and takes the fit past what three evenly-spaced points can
+   do. The reason is visible in the covariance: with A and P at the sides and S on top,
+   the horizontal position of the centre is pinned by two points averaging, while the
+   VERTICAL position rests on S almost alone -- so S's noise passes through undiluted and
+   the uncertainty ellipse is a vertical cigar. Only a point away from that axis fixes it.
+
+   Each candidate angle is scored by the centre covariance it would produce, so the tool
+   names the part of the rim to click instead of asking for more of the same. */
+function bestNextAngle(P, f){
+  if(!f || P.length<3) return null;
+  const rows=P.map(p=>{
+    const t=Math.atan2(p.y*img.height-f.b, p.x*img.width-f.a);
+    return [-Math.cos(t), -Math.sin(t), -1];
+  });
+  const score=extra=>{
+    const R = extra===null ? rows
+            : rows.concat([[-Math.cos(extra), -Math.sin(extra), -1]]);
+    const M=[[0,0,0],[0,0,0],[0,0,0]];
+    R.forEach(r=>{ for(let i=0;i<3;i++) for(let k=0;k<3;k++) M[i][k]+=r[i]*r[k]; });
+    const C=inv3(M);
+    if(!C) return Infinity;
+    const cxx=C[0][0], cxy=C[0][1], cyy=C[1][1], tr=cxx+cyy;
+    return tr/2 + Math.sqrt(Math.max(0, tr*tr/4 - (cxx*cyy-cxy*cxy)));
+  };
+  const now=score(null);
+  let best=null, bv=Infinity;
+  for(let i=0;i<24;i++){ const t=i*Math.PI/12, v=score(t); if(v<bv){ bv=v; best=t; } }
+  // only worth saying if it is a real improvement, not a rounding one
+  return (best!==null && bv < now*0.8) ? best : null;
+}
+// The rim named the way a reader thinks about it, which depends on which way the patient
+// faces -- image-left is anterior on one film and posterior on the next.
+function rimName(t){
+  const L = FACE==='left' ? 'anterior' : 'posterior';
+  const Rt = FACE==='left' ? 'posterior' : 'anterior';
+  const names=[Rt, 'infero-'+Rt, 'inferior', 'infero-'+L, L, 'supero-'+L,
+               'superior', 'supero-'+Rt];
+  const d=((t*180/Math.PI)%360+360)%360;
+  return names[Math.round(d/45)%8];
+}
+
 function refit(){
   if(!img.width){ fits = HD.map(()=>null); return; }
   // every mark carries its own placement score, recomputed as it is dragged
@@ -882,6 +938,11 @@ function readout(){
                if(cls==='ok') cls='mid'; }
   if(fits.some(f=>f&&f.swapped)){ tag += '  A/P LOOK SWAPPED'; cls='bad'; }
   if(all.length && onc<all.length && cls==='ok') cls='mid';
+  // not just "add more points" -- which part of the rim, measured
+  if(cls!=='ok' && fits[acur]){
+    const w=bestNextAngle(HD[acur].pts, fits[acur]);
+    if(w!==null) tag += '  → add a point: '+rimName(w)+' margin';
+  }
   el.className='ifarc '+cls;
   el.textContent=bits.join('   ')+qcbit+tag;
 }
