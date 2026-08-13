@@ -19,6 +19,31 @@ Three things here are deliberate rather than decorative:
     suggestibility instead of anatomy.
 """
 
+import hashlib
+import pathlib
+
+
+def _v(name: str) -> str:
+    """Content hash of a bundled asset, for cache-busting its URL.
+
+    The teaching panels are served with a long max-age -- they are the same bytes on
+    every request and re-fetching them per film would be wasteful. The cost of that is
+    that REPLACING one leaves every reader who has already opened the page looking at the
+    old picture for a day, which is exactly what happened when the panels were rebuilt for
+    the landmark method: the instructions changed and the figure beside them did not.
+
+    Hashing the file into its own URL fixes both ends. The URL only changes when the bytes
+    change, so caching stays aggressive AND a new panel appears immediately.
+    """
+    try:
+        return hashlib.md5(pathlib.Path(__file__).with_name(name)
+                           .read_bytes()).hexdigest()[:10]
+    except OSError:
+        return "0"          # not bundled yet; the route will 404 either way
+
+
+REF_V = {k: _v(f"ref_{k}.png") for k in "abc"}
+
 CRITERIA = """
 <aside id=guide>
  <div class=helpbody>
@@ -170,12 +195,16 @@ CRITERIA = """
         as small rings rather than labelled squares, they are not landmarks, and they exist
         only to tighten the circle. More is always better.</li>
     <li><b>Drag any point</b> to correct it; the circle, the centre and the ellipse
-        re-fit live. <kbd>u</kbd> removes the last point, and also undoes a
-        <b>Can&rsquo;t see it</b>.</li>
+        re-fit live. <b>Click a point and press <kbd>Delete</kbd></b> to remove it.
+        <b><kbd>Ctrl</kbd>+<kbd>Z</kbd></b> (or <kbd>u</kbd>) undoes the last thing you
+        did &mdash; a click, a rename, a drag, or a <b>Can&rsquo;t see it</b>.</li>
     <li>The fitted circle is drawn <b>solid where you gave it evidence and dashed where it
         is extrapolating</b>. A mostly-dashed circle is a warning, not a finished mark.</li>
-    <li>For a <b>second head</b>, press <kbd>h</kbd> (or New head) and mark A, S and P on
-        it too. <kbd>h</kbd> also switches back if you want to add points to the first.</li>
+    <li><b>The tool moves to the second head on its own</b> as soon as you have named
+        A, S and P on the first &mdash; the header says so, and the second head&rsquo;s
+        marks are drawn in red. <b>If this film has only one head, press <kbd>h</kbd> to
+        go back</b> to it (and add rim points), then Submit. <kbd>h</kbd> switches between
+        the two at any time.</li>
     <li><b>Elsewhere the controls are a PACS.</b> Scroll zooms about the cursor,
         <b>left-drag</b> on bare film windows it (left-right contrast, up-down
         brightness), <b>right-drag</b> pans, <kbd>r</kbd> resets. A faint arc usually
@@ -272,29 +301,35 @@ CRITERIA = """
 </aside>
 """
 
-EXAMPLES = """
+EXAMPLES = ("""
 <aside id=example>
   <h3>Worked example</h3>
   <figure>
-   <img src="/reference/c" alt="two femoral heads, each with a fitted circle">
-   <figcaption><b>Two heads.</b> Same diameter, offset front-to-back, a circle on each.
-   The midpoint between the centres is derived for you.</figcaption>
+   <img src="/reference/c?v=__VC__" alt="two femoral heads on a rotated view, A S and P
+        marked on each">
+   <figcaption><b>Two heads.</b> Same diameter, offset front-to-back, <b>A, S and P on
+   each</b>. The midpoint between the two fitted centres is derived for you.</figcaption>
   </figure>
   <figure>
-   <img src="/reference/b" alt="the concentric-circle construction on one head">
-   <figcaption><b>One head.</b> Size the circle to the subchondral cortical arc, not to
-   the brightest shadow.</figcaption>
+   <img src="/reference/b?v=__VB__" alt="anterior, superior and posterior extremes marked
+        on one femoral head">
+   <figcaption><b>One head.</b> The anterior-, superior- and posterior-most points of the
+   articular surface. Follow the subchondral cortical arc, not the brightest
+   shadow.</figcaption>
   </figure>
   <figure>
-   <img src="/reference/a" alt="where the femoral head sits on a lateral film">
+   <img src="/reference/a?v=__VA__" alt="where the femoral head sits on a lateral film">
    <figcaption><b>Where to look.</b> Below and anterior to the S1 endplate, seated in
    the acetabulum.</figcaption>
   </figure>
-  <p class=exnote>Drawn on a DRR of a segmented CT, so the marked centre is a 3-D sphere
-  fit projected &mdash; not anyone's opinion. The second head in the top panel is a
-  schematic: a DRR integrates along the hip axis, so its two heads superimpose exactly.</p>
+  <p class=exnote>Drawn on a DRR of a segmented CT, so every mark is measured rather than
+  anyone's opinion: the three landmarks are the extremes of a sphere fitted to the femoral
+  head at its contact with the acetabulum, and the circle through them recovers that
+  sphere's centre exactly. The two-head panel is the <b>same scan projected 8&deg; off the
+  hip axis</b> &mdash; a real rotation, so the heads are really that far apart.</p>
 </aside>
-"""
+""".replace("__VA__", REF_V["a"]).replace("__VB__", REF_V["b"])
+   .replace("__VC__", REF_V["c"]))
 
 STYLE = """
  :root{--go:#0072B2;--lft:#00E5A0;--rgt:#FF3B30;--warn:#f5a524}
@@ -312,7 +347,13 @@ STYLE = """
  .sk{background:#3a3a44;color:#ddd;font-weight:500}
  .ghost{background:transparent;color:#9aa;border:1px solid #3a3a44;font-weight:500}
  kbd{background:#333;padding:1px 5px;border-radius:3px;font-size:11px;font-weight:400}
- #msg{margin-left:auto;color:#9ad;font-variant-numeric:tabular-nums}
+ /* The status line must never change the header's HEIGHT. The header is flex-wrap, so a
+    long message pushes onto a second row, #stage moves, and the film slides out from
+    under the cursor mid-annotation -- a click aimed at the cortex lands 60 px away. It is
+    the same hazard #wl is fixed-width for. One line, clipped, full text in the tooltip. */
+ #msg{margin-left:auto;color:#9ad;font-variant-numeric:tabular-nums;
+      flex:0 1 auto;max-width:52ch;white-space:nowrap;overflow:hidden;
+      text-overflow:ellipsis}
  #who{color:#8a8;font-size:12px}
  /* Only one tool's instructions and controls are ever shown. The class goes on <body>
     so it reaches the guide, the header hint and the buttons from one place. */
@@ -443,12 +484,13 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
   <span class=ifcircle>click to drop a circle &middot; hover it and <b>scroll</b> to size &middot; drag to nudge</span>
   <button class="ghost ifarc" id=btnface onclick=toggleFace()
     title="which way the patient faces on this film. Sticky — set it once and it carries to every film after. m">Faces &#9664; anterior left</button>
+  <button class=ghost onclick=undo()
+    title="Ctrl+Z, or u. Undoes the last thing you did — a click, a rename, a drag, a skip.">Undo <kbd>&#8984;Z</kbd></button>
   <button class="ghost ifarc" onclick=autoName()
     title="name your existing clicks A/S/P from the shape of the circle they fit. Never adds a point; every name stays editable.">Auto-name <kbd>w</kbd></button>
   <button class="ghost ifarc" id=btnskip onclick=skipRole()
     title="this extreme cannot be traced — derive it from the circle and record it as unobserved">Can&rsquo;t see it <kbd>k</kbd></button>
   <button class="ghost ifarc" id=btnhead onclick=newHead()>New head <kbd>h</kbd></button>
-  <button class=ghost onclick=undo()>Undo <kbd>u</kbd></button>
   <button class=go onclick=send()>Submit <kbd>&crarr;</kbd></button>
   <button class=nv onclick=notVisible()>Not visible <kbd>v</kbd></button>
   <button class=sk onclick=pass()>Pass <kbd>p</kbd></button>
@@ -565,6 +607,40 @@ const ROLE_NAME={A:'ANTERIOR extreme', S:'SUPERIOR extreme', P:'POSTERIOR extrem
 //   pts  [{x,y,role}]  in placement order, role '' for an extra rim point
 //   skip {A,S,P}       an extreme the reader could not see; derived from the fit instead
 let HD=[{pts:[], skip:{}}], acur=0, fits=[], sel2=null;   // sel2 = {arc,i} selected point
+/* UNDO IS A STACK, not "remove the last point".
+   Once points can be renamed, dragged, deleted, skipped and auto-assigned, "undo the last
+   click" stops matching what the reader thinks they just did -- renaming A to S and then
+   pressing undo should put the name back, not delete a landmark. So every mutating action
+   snapshots first and undo restores the snapshot. Ctrl+Z and u both run it. */
+let HIST=[];
+const MAXHIST=80;
+function snap(){
+  return JSON.stringify({
+    hd: HD.map(h=>({pts:h.pts.map(p=>({x:p.x, y:p.y, role:p.role})),
+                    skip:Object.assign({}, h.skip)})),
+    acur:acur, sel2:sel2, auto:autoSwitched});
+}
+function pushHist(){
+  if(TOOL!=='arc') return;
+  HIST.push(snap());
+  if(HIST.length>MAXHIST) HIST.shift();
+}
+function restore(js){
+  const st=JSON.parse(js);
+  HD = st.hd.map(h=>({pts:h.pts.map(p=>({x:p.x, y:p.y, role:p.role})),
+                      skip:h.skip||{}}));
+  acur = Math.min(st.acur, HD.length-1);
+  sel2 = st.sel2;
+  autoSwitched = !!st.auto;
+  refit(); draw(); readout();
+}
+// The film has ONE head on most laterals and two on a rotated one, so the tool cannot
+// know when the reader is finished. It can know when they have named all three landmarks
+// on the head they are working on, and that is the moment to offer the second -- see
+// place().
+let autoSwitched=false;
+// true only between the hand-off and the reader's next click -- see place()
+let pendingSwitch=false;
 const newHd=()=>({pts:[], skip:{}});
 // The landmark the next click will become: the first of A,S,P neither placed nor skipped,
 // then '' for extras. This is a SUGGESTION, never a constraint -- see relabel().
@@ -580,6 +656,7 @@ const roleAt=(h,r)=>h.pts.find(p=>p.role===r) || null;
 // way backwards to fix a label, which is how you train people to submit a wrong one.
 function relabel(r, target){
   if(TOOL!=='arc') return;
+  pushHist();
   const t = target || sel2 || (HD[acur].pts.length
               ? {arc:acur, i:HD[acur].pts.length-1} : null);
   if(!t){ msg('click a point first, then press '+(r||'e')+' to name it'); return; }
@@ -937,6 +1014,18 @@ function readout(){
   if(tilt>12){ tag += '  A/P tilt '+Math.round(tilt)+'\\u00b0';
                if(cls==='ok') cls='mid'; }
   if(fits.some(f=>f&&f.swapped)){ tag += '  A/P LOOK SWAPPED'; cls='bad'; }
+  // The cost of handing head 2 over automatically: a reader who keeps clicking to add
+  // rim points builds a second "head" on top of the first. Two fitted centres almost on
+  // top of each other are not two heads, and the midpoint of that pair is meaningless --
+  // so say so rather than accepting it.
+  const F2=fits.filter(Boolean);
+  if(F2.length===2){
+    const d=Math.hypot(F2[0].a-F2[1].a, F2[0].b-F2[1].b);
+    if(d < 0.5*(F2[0].R+F2[1].R)*0.5){
+      tag += '  \u2190 these two are the SAME head (press h, then u)';
+      cls='bad';
+    }
+  }
   if(all.length && onc<all.length && cls==='ok') cls='mid';
   // not just "add more points" -- which part of the rim, measured
   if(cls!=='ok' && fits[acur]){
@@ -953,6 +1042,7 @@ function autoName(){
   if(TOOL!=='arc')return;
   const h=HD[acur], f=fits[acur];
   if(!f){ msg('mark at least 3 points first'); return; }
+  pushHist();
   const used=new Set();
   ROLES.forEach(r=>{
     if(h.skip[r]) return;
@@ -1010,7 +1100,7 @@ const $=i=>document.getElementById(i);
 // X-Annot-Token, not Authorization: on a private Space the Hub proxy
 // consumes Authorization before the app ever sees it.
 const H=()=>token?{'X-Annot-Token':token}:{};
-const msg=t=>$('msg').textContent=t;
+const msg=t=>{ const e=$('msg'); e.textContent=t; e.title=t; };
 
 function useToken(){
   const v=$('tok').value.trim(); if(!v)return;
@@ -1061,7 +1151,8 @@ function progress(p){
 }
 async function load(){
   if(busy)return; busy=true;
-  circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null; sel2=null; readout();
+  circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null;
+  HIST=[]; autoSwitched=false; pendingSwitch=false; readout();
   const t0=performance.now();
   try{
     const r=await fetch('/next',{headers:H()});
@@ -1352,7 +1443,7 @@ C.addEventListener('pointerdown',e=>{
   const pt=(TOOL==='arc' && e.button===0) ? hitPt(e) : null;
   const i=(TOOL!=='arc' && e.button===0) ? hit(p) : -1;
   if(i>=0) sel=i;
-  if(pt){ acur=pt.arc; sel2={arc:pt.arc, i:pt.i}; }   // grabbing a point selects it
+  if(pt){ acur=pt.arc; sel2={arc:pt.arc, i:pt.i}; pushHist(); }   // grabbing selects it
   drag={x:e.clientX, y:e.clientY, b:gainB, c:gainC, moved:0, btn:e.button,
         circle:i, cx:i>=0?circles[i][0]:0, cy:i>=0?circles[i][1]:0,
         pt:pt, px:pt?HD[pt.arc].pts[pt.i].x:0, py:pt?HD[pt.arc].pts[pt.i].y:0,
@@ -1436,12 +1527,48 @@ function place(e){
   if(!img.width)return;
   const p=at(e);
   if(TOOL==='arc'){
+    pushHist();
+    // THE HAND-OFF IS PROVISIONAL. Moving to head 2 after the third landmark is right on
+    // a rotated film and wrong on the far commoner one-head film, where the reader's next
+    // click is another rim point for the head they just finished -- and would otherwise
+    // start building a phantom second head on top of the first.
+    //
+    // The click itself says which it is. Land back inside head 1 and the hand-off is
+    // taken back; land anywhere else and it stands. Only the FIRST click after the switch
+    // is treated this way, so a genuine second head is not second-guessed later.
+    let tookBack=false;
+    if(pendingSwitch && acur===1 && HD[1] && !HD[1].pts.length){
+      pendingSwitch=false;
+      const f0=fits[0];
+      if(f0 && Math.hypot(p[0]*img.width-f0.a, p[1]*img.height-f0.b) <= 1.35*f0.R){
+        HD.splice(1,1); acur=0; sel2=null; tookBack=true;
+      }
+    }
     const h=HD[acur], r=nextRole(h);
     h.pts.push({x:p[0], y:p[1], role:r});
     sel2={arc:acur, i:h.pts.length-1};
-    refit(); draw(); readout();
     const nx=nextRole(h);
-    msg(!r ? (h.pts.length+' points on head '+(acur+1))
+    // Naming the third landmark completes a head, so the next click starts the SECOND
+    // one -- the common case on a rotated film, and it saves reaching for a key on every
+    // film that has two. Fires once per film, only from the first head, and h goes
+    // straight back if the reader wants to add rim points to head 1 instead.
+    if(r && !nx && !autoSwitched && HD.length===1){
+      // Its own undo step. The hand-off and the click that triggered it are one keystroke
+      // but two things in the reader's head, and Ctrl+Z should take back the hand-off --
+      // returning them to a complete head 1 -- rather than also deleting the landmark
+      // they had just got right.
+      pushHist();
+      autoSwitched=true; pendingSwitch=true;
+      HD.push(newHd()); acur=1; sel2=null;
+      refit(); draw(); readout();
+      msg('head 1 done \u2014 now HEAD 2. Only one head? press h');
+      return;
+    }
+    refit(); draw(); readout();
+    // tookBack first: the trailing status line would otherwise overwrite the one thing
+    // the reader needs to know, which is that the tool just changed its mind for them.
+    msg(tookBack ? 'still head 1 \\u2014 rim point added (h for head 2)'
+        : !r ? (h.pts.length+' points on head '+(acur+1))
         : nx ? (ROLE_NAME[r]+' marked \\u2014 now the '+ROLE_NAME[nx])
              : 'all three marked \\u2014 add rim points to tighten it, or Submit');
     return;
@@ -1453,19 +1580,26 @@ function place(e){
 }
 function undo(){
   if(TOOL==='arc'){
-    const h=HD[acur];
-    // A skip is a decision too, and it is invisible on the film, so it has to be
-    // undoable -- otherwise a mis-keyed skip permanently downgrades a landmark that the
-    // reader could actually see.
-    const lastSkip=ROLES.filter(r=>h.skip[r]).pop();
-    if(h.pts.length) h.pts.pop();
-    else if(lastSkip) delete h.skip[lastSkip];
-    // an emptied second head is removed rather than left as a stub that submits as a head
-    else if(acur>0){ HD.splice(acur,1); acur=HD.length-1; }
-    sel2=null; refit(); draw(); readout();
+    if(!HIST.length){ msg('nothing to undo'); return; }
+    restore(HIST.pop());
+    msg('undone');
     return;
   }
   circles.pop(); sel=circles.length-1; draw();
+}
+// Delete / Backspace on the selected point. Clicking the offending mark and pressing
+// delete is what everyone reaches for first, and undo only helps when the mistake was
+// the most recent thing that happened.
+function delPoint(){
+  if(TOOL!=='arc') return;
+  if(!sel2 || !HD[sel2.arc] || !HD[sel2.arc].pts[sel2.i]){
+    msg('click a point first, then Delete to remove it'); return; }
+  pushHist();
+  const gone=HD[sel2.arc].pts.splice(sel2.i,1)[0];
+  // an emptied second head is dropped rather than left as a stub with no landmarks
+  if(!HD[sel2.arc].pts.length && sel2.arc>0){ HD.splice(sel2.arc,1); acur=HD.length-1; }
+  sel2=null; refit(); draw(); readout();
+  msg(gone.role ? ('removed the '+ROLE_NAME[gone.role]) : 'removed a rim point');
 }
 // An extreme that genuinely cannot be traced. It is derived from the fitted circle and
 // exported as NOT observed, so the film is still usable for the centre without teaching a
@@ -1474,6 +1608,7 @@ function skipRole(){
   if(TOOL!=='arc')return;
   const h=HD[acur], r=nextRole(h);
   if(!r){ msg('all three extremes are already marked'); return; }
+  pushHist();
   h.skip[r]=true;
   refit(); draw(); readout();
   const nx=nextRole(h);
@@ -1484,8 +1619,10 @@ function skipRole(){
 // missed piece of the first rim after starting the second should not have to undo to it.
 function newHead(){
   if(TOOL!=='arc')return;
+  pendingSwitch=false;
   if(HD.length<2){
     if(HD[acur].pts.length<3){ msg('finish this head first — 3 points minimum'); return; }
+    pushHist();
     HD.push(newHd()); acur=1;
   } else {
     acur=(acur+1)%HD.length;
@@ -1501,7 +1638,8 @@ function applyTool(){
 function toggleTool(){
   TOOL = (TOOL==='arc') ? 'circle' : 'arc';
   try{localStorage.setItem('annot_tool',TOOL)}catch(e){}
-  circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[];
+  circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null;
+  HIST=[]; autoSwitched=false; pendingSwitch=false;
   applyTool(); draw(); readout();
   msg('tool: '+TOOL+' — marks cleared');
 }
@@ -1628,6 +1766,12 @@ async function pass(){
 }
 document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+  // Ctrl+Z / Cmd+Z as well as u, and Delete/Backspace on the selected mark.
+  // preventDefault on both: the browser would otherwise treat Ctrl+Z as page-level undo
+  // and Backspace as navigate-back, which loses the whole read.
+  if((e.ctrlKey||e.metaKey) && (e.key==='z'||e.key==='Z')){
+    e.preventDefault(); undo(); return; }
+  if(e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); delPoint(); return; }
   if(e.key==='u')undo();
   else if(e.key==='Enter')send();
   else if(e.key==='v')notVisible();
@@ -1761,7 +1905,7 @@ REVIEW = """<!doctype html><html lang=en><meta charset=utf-8>
 <script>
 const $=i=>document.getElementById(i);
 const H=()=>{const t=localStorage.getItem('hf_tok');return t?{'X-Annot-Token':t}:{}};
-const msg=t=>$('msg').textContent=t;
+const msg=t=>{ const e=$('msg'); e.textContent=t; e.title=t; };
 const COL=['#00E5A0','#FF3B30'];
 let cases=[], cur=null, img=new Image(), mine=[];
 const C=$('rc'), X=C.getContext('2d');

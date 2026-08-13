@@ -128,12 +128,51 @@ with sync_playwright() as p:
     check(pg.evaluate("""(()=>[...document.querySelectorAll('#example img')]
                                .every(i=>i.naturalWidth>0))()"""),
           "every example panel image loaded")
+    # CACHE BUSTING. The panels are served immutable/1-year, which is only safe because
+    # their URL carries a hash of their bytes. If the hash ever stops being appended, a
+    # rebuilt teaching figure would never reach a reader who had already opened the page
+    # -- they would follow landmark instructions beside the previous method's picture,
+    # which is exactly the failure this guards.
+    srcs = pg.eval_on_selector_all("#example img", "es => es.map(e => e.src)")
+    import re as _re
+    check(all(_re.search(r"/reference/[abc]\?v=[0-9a-f]{6,}$", u) for u in srcs),
+          f"every panel URL carries a content hash ({[u.split('/')[-1] for u in srcs]})")
+    check(len({u.split("v=")[1] for u in srcs}) == 3,
+          "and the three differ, so they are hashes of content rather than one build id")
+    hdrs = pg.evaluate("""async () => {
+        const r = await fetch(document.querySelector('#example img').src);
+        const h = await fetch('/');
+        return {img: r.headers.get('cache-control'),
+                page: h.headers.get('cache-control')};
+      }""")
+    print(f"       cache-control  panel: {hdrs['img']}   page: {hdrs['page']}")
+    check("immutable" in (hdrs["img"] or ""),
+          "the hashed panel is cached hard")
+    check("no-store" in (hdrs["page"] or ""),
+          "but the page itself is never cached, so a redeploy reaches readers at once")
     check(canvas["x"] > guide["x"] + guide["width"] - 2,
           "film is on the RIGHT, clear of the guide")
     check(guide["height"] <= VIEW["height"], "guide fits the window (scrolls internally)")
     check(pg.evaluate("(()=>{const g=document.getElementById('guide');"
                       "return g.scrollHeight > g.clientHeight})()"),
           "guide actually scrolls rather than clipping")
+
+    # A long status message must not re-wrap the header. When it did, #stage moved and
+    # the film slid out from under the cursor: a click aimed at the cortex landed 60 px
+    # away, silently, mid-annotation.
+    h0 = pg.locator("header").bounding_box()["height"]
+    y0 = pg.locator("#c").bounding_box()["y"]
+    pg.evaluate("msg('head 1 done — now HEAD 2. Only one head? press h. "
+                "and then some more text to be quite sure it would have wrapped')")
+    pg.wait_for_timeout(200)
+    h1 = pg.locator("header").bounding_box()["height"]
+    y1 = pg.locator("#c").bounding_box()["y"]
+    check(abs(h1 - h0) < 1 and abs(y1 - y0) < 1,
+          f"a long status message does not move the film "
+          f"(header {h0:.0f}->{h1:.0f} px, film y {y0:.0f}->{y1:.0f})")
+    check(pg.eval_on_selector("#msg", "e => e.title").startswith("head 1 done"),
+          "and the full text is still readable, in the tooltip")
+    pg.evaluate("msg('')")
 
     gap = VIEW["height"] - (canvas["y"] + canvas["height"])
     check(gap >= 50, f"bottom gutter clear of the taskbar ({gap:.0f} px below the film)")

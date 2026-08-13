@@ -543,17 +543,37 @@ def reference_panel(panel: str):
 
 
 def _png(name: str):
+    """A bundled PNG, cached hard and keyed by its own content.
+
+    `immutable` is only honest because ui.py appends a content hash to these URLs: the
+    bytes behind a given URL genuinely never change, and a rebuilt panel arrives as a
+    DIFFERENT url. Before that, max-age=86400 meant replacing a teaching panel left every
+    reader who had already opened the page looking at the old one for a day -- which is
+    what happened when the figure was rebuilt for the landmark method, leaving the
+    instructions and the picture beside them describing different things.
+
+    The ETag makes an unversioned request (someone who bookmarked /reference/b) revalidate
+    cheaply instead of re-downloading.
+    """
     here = os.path.dirname(os.path.abspath(__file__))
     fp = os.path.join(here, name)
     if os.path.exists(fp):
-        return Response(open(fp, "rb").read(), media_type="image/png",
-                        headers={"Cache-Control": "public, max-age=86400"})
+        body = open(fp, "rb").read()
+        return Response(body, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable",
+                                 "ETag": '"%s"' % hashlib.md5(body).hexdigest()[:16]})
     raise HTTPException(404, f"{name} not bundled")
+
+
+# The pages are generated from ui.py at import, so a redeploy is meant to change them
+# immediately. Nothing may sit in front of that: a cached shell would keep serving the old
+# markup -- and the old asset URLs with it -- after the Space has already restarted.
+NOCACHE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return PAGE
+    return HTMLResponse(PAGE, headers=NOCACHE)
 
 
 @app.get("/next")
@@ -916,12 +936,12 @@ def adjudicate(case_id: str = Form(...), points: str = Form(""),
 
 @app.get("/review", response_class=HTMLResponse)
 def review():
-    return REVIEW
+    return HTMLResponse(REVIEW, headers=NOCACHE)
 
 
 @app.get("/board", response_class=HTMLResponse)
 def board():
-    return BOARD
+    return HTMLResponse(BOARD, headers=NOCACHE)
 
 
 def heads(p: Optional[dict]) -> list:

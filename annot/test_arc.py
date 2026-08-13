@@ -289,6 +289,113 @@ with sync_playwright() as p:
     check(not pg.evaluate("HD[0].skip['A']"),
           "u undoes a skip -- it is a decision too, and it is invisible on the film")
 
+    print("\n[6b] the hand-off to the second head")
+    pg.evaluate("() => { HD=[newHd()]; acur=0; sel2=null; HIST=[]; "
+                "autoSwitched=false; pendingSwitch=false; fits=[]; draw(); }")
+    box = pg.locator("#c").bounding_box()
+
+    def click(deg, dx=0.0):
+        q = rim(deg)
+        pg.mouse.click(box["x"] + box["width"] * (q[0] + dx),
+                       box["y"] + box["height"] * q[1])
+        pg.wait_for_timeout(80)
+
+    for g in (180, 270, 0):                      # A, S, P on head 1
+        click(g)
+    check(pg.evaluate("HD.length") == 2 and pg.evaluate("acur") == 1,
+          "naming the third landmark hands over to head 2 on its own")
+    check(pg.evaluate("HD[0].pts.length") == 3 and pg.evaluate("HD[1].pts.length") == 0,
+          "head 1 keeps its three, head 2 starts empty")
+    check("HEAD 2" in pg.eval_on_selector("#msg", "e => e.textContent"),
+          "and the header says so, because a one-head film has to go back")
+
+    # THE HAND-OFF IS PROVISIONAL. On the far commoner one-head film the next click is
+    # another rim point for the head just finished, and taking it as head 2 would build a
+    # phantom head on top of the first -- the exact thing readers are told not to do.
+    click(225)
+    check(pg.evaluate("HD.length") == 1 and pg.evaluate("acur") == 0
+          and pg.evaluate("HD[0].pts.length") == 4,
+          "clicking back on head 1's own rim takes the hand-off back")
+    check("still head 1" in pg.eval_on_selector("#msg", "e => e.textContent"),
+          "and says so, rather than silently changing its mind")
+    click(315)
+    click(90)
+    check(pg.evaluate("HD.length") == 1 and pg.evaluate("HD[0].pts.length") == 6,
+          "so a reader adding rim points keeps adding them to the same head")
+    check("good" in pg.eval_on_selector("#fitread", "e => e.textContent"),
+          "which is what takes the fit from 'widen' to 'good'")
+
+    # ...while a click that is NOT on head 1 confirms it
+    pg.evaluate("() => { HD=[newHd()]; acur=0; sel2=null; HIST=[]; "
+                "autoSwitched=false; pendingSwitch=false; fits=[]; draw(); }")
+    for g in (180, 270, 0):
+        click(g)
+    click(270, dx=0.14)
+    check(pg.evaluate("HD.length") == 2 and pg.evaluate("HD[1].pts.length") == 1,
+          "a click away from head 1 confirms the hand-off and starts head 2")
+
+    # a genuine second head fitted on top of the first is still called out
+    put([(180, 'A'), (270, 'S'), (0, 'P')])
+    put([(180, 'A'), (270, 'S'), (0, 'P')], head=1, dx=0.004)
+    pg.wait_for_timeout(150)
+    tag = pg.eval_on_selector("#fitread", "e => e.textContent")
+    print(f"       two fits on the same anatomy: {tag!r}")
+    check("SAME head" in tag,
+          "two centres almost on top of each other are called out, not accepted")
+
+    print("\n[6c] undo and delete")
+    pg.evaluate("() => { HD=[newHd()]; acur=0; sel2=null; HIST=[]; "
+                "autoSwitched=false; pendingSwitch=false; fits=[]; draw(); }")
+    for g in (180, 270, 0):
+        click(g)
+    click(225)                                   # comes back to head 1
+    check(pg.evaluate("HD[0].pts.length") == 4, "four points on one head")
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(120)
+    check(pg.evaluate("HD[0].pts.length") == 3, "Ctrl+Z undoes the last click")
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(120)
+    # The hand-off is its own undo step, so taking it back leaves head 1 COMPLETE rather
+    # than also removing the landmark that triggered it.
+    check(pg.evaluate("HD[0].pts.length") == 3
+          and pg.evaluate("ROLES.filter(r=>roleAt(HD[0],r)).join('')") == "ASP",
+          "and the next Ctrl+Z takes back the hand-off, leaving head 1 complete")
+
+    # a RENAME must undo to the previous name, not delete the landmark -- the thing a
+    # pop-the-last-point undo gets wrong
+    put([(180, 'A'), (270, 'S'), (0, 'P')])
+    pg.evaluate("() => { HIST=[]; sel2={arc:0,i:0}; }")
+    pg.keyboard.press("2")
+    pg.wait_for_timeout(120)
+    check(pg.evaluate("HD[0].pts[0].role") == "S", "renaming A to S works")
+    check(pg.evaluate("HD[0].pts.filter(p=>p.role==='S').length") == 1,
+          "and demotes whatever used to be S")
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(120)
+    check(pg.evaluate("ROLES.filter(r=>roleAt(HD[0],r)).join('')") == "ASP"
+          and pg.evaluate("HD[0].pts.length") == 3,
+          "and Ctrl+Z puts BOTH names back rather than deleting a point")
+
+    # click a mark, press Delete
+    click(270)
+    check(pg.evaluate("sel2 !== null"), "clicking an existing point selects it")
+    pg.keyboard.press("Delete")
+    pg.wait_for_timeout(120)
+    check(pg.evaluate("HD[0].pts.length") == 2
+          and pg.evaluate("roleAt(HD[0],'S')") is None,
+          "Delete removes the selected landmark")
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(120)
+    check(pg.evaluate("roleAt(HD[0],'S') !== null"), "and Ctrl+Z brings it back")
+    pg.evaluate("sel2={arc:0,i:0}")
+    pg.keyboard.press("Backspace")
+    pg.wait_for_timeout(120)
+    check(pg.evaluate("HD[0].pts.length") == 2, "Backspace does the same")
+    check(pg.evaluate("location.pathname") == "/",
+          "and does NOT navigate the browser back, which would lose the whole read")
+    pg.keyboard.press("Control+z")
+    pg.wait_for_timeout(120)
+
     print("\n[7] latency")
     lat = pg.evaluate("""([cx,cy,cr,asp]) => {
         const t=(f,n)=>{const s=performance.now(); for(let i=0;i<n;i++) f(i);
