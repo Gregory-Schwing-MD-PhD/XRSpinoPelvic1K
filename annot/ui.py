@@ -81,8 +81,14 @@ CRITERIA = """
    round&rdquo; only means something once you already know where the centre is &mdash;
    which is the thing we are trying to find.</p>
 
-   <p class="warn ifarc"><b>Add points away from A, S and P &mdash; and where matters more
-   than how many.</b> A, S and P are the points you can <i>name</i>; they are not the three
+   <p class="warn ifarc"><b>Three points is not a finished mark.</b> A, S and P name the
+   anatomy; the <i>rim points</i> are what make the circle accurate, and the tool will not
+   let a loose fit past without telling you. In the first round of this study half of all
+   heads were fitted from three points and nothing else, and four in five were submitted
+   with the tool&rsquo;s own error bar already outside tolerance. <b>Keep clicking round the
+   visible cortex until the header stops saying <span class=mid>widen</span>.</b></p>
+
+   <p class="warn ifarc"><b>Where the extra points go matters more than how many.</b> A, S and P are the points you can <i>name</i>; they are not the three
    that pin a circle best. With A and P at the sides and S on top, the <i>side-to-side</i>
    position of the centre is fixed by two points at once, but its <i>up-and-down</i>
    position rests on S almost alone &mdash; which is why the uncertainty ellipse comes out
@@ -208,11 +214,15 @@ CRITERIA = """
         did &mdash; a click, a rename, a drag, or a <b>Can&rsquo;t see it</b>.</li>
     <li>The fitted circle is drawn <b>solid where you gave it evidence and dashed where it
         is extrapolating</b>. A mostly-dashed circle is a warning, not a finished mark.</li>
-    <li><b>The tool moves to the second head on its own</b> as soon as you have named
-        A, S and P on the first &mdash; the header says so, and the second head&rsquo;s
-        marks are drawn in red. <b>If this film has only one head, press <kbd>h</kbd> to
-        go back</b> to it (and add rim points), then Submit. <kbd>h</kbd> switches between
-        the two at any time.</li>
+    <li><b>Only mark a second head if you can see a second arc.</b> Most laterals show
+        one: the two heads superimpose and there is nothing to separate. When the film is
+        rotated you get two circles of the <i>same diameter</i>, side by side
+        front-to-back &mdash; then press <kbd>h</kbd> and mark A, S and P on the second
+        one too. <kbd>h</kbd> switches between them at any time, and the head you are not
+        working on <b>fades to a thin circle</b> so it stops crowding the one you
+        are.</li>
+    <li><b>Hold <kbd>b</kbd> to blink every mark off</b> and look at the bare film. The
+        fastest way to check that a circle really is sitting on the cortex.</li>
     <li><b>Elsewhere the controls are a PACS.</b> Scroll zooms about the cursor,
         <b>left-drag</b> on bare film windows it (left-right contrast, up-down
         brightness), <b>right-drag</b> pans, <kbd>r</kbd> resets. A faint arc usually
@@ -351,6 +361,8 @@ STYLE = """
         font-weight:600}
  button:disabled{opacity:.45;cursor:not-allowed}
  .go{background:var(--go);color:#fff}
+ /* Submit carries the fit's verdict: the header readout alone was ignored. */
+ .warnbtn{background:var(--warn);color:#231a00}
  .nv{background:var(--warn);color:#231a00}
  .sk{background:#3a3a44;color:#ddd;font-weight:500}
  .ghost{background:transparent;color:#9aa;border:1px solid #3a3a44;font-weight:500}
@@ -521,7 +533,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
   <button class="ghost ifarc" id=btnskip onclick=skipRole()
     title="this extreme cannot be traced — derive it from the circle and record it as unobserved">Can&rsquo;t see it <kbd>k</kbd></button>
   <button class="ghost ifarc" id=btnhead onclick=newHead()>New head <kbd>h</kbd></button>
-  <button class=go onclick=send()>Submit <kbd>&crarr;</kbd></button>
+  <button class=go id=btnsend onclick=send()>Submit <kbd>&crarr;</kbd></button>
   <button class=nv onclick=notVisible()>Not visible <kbd>v</kbd></button>
   <button class=sk onclick=pass()>Pass <kbd>p</kbd></button>
   <button class=ghost onclick=flagIt()>Flag <kbd>f</kbd></button>
@@ -653,7 +665,7 @@ function snap(){
   return JSON.stringify({
     hd: HD.map(h=>({pts:h.pts.map(p=>({x:p.x, y:p.y, role:p.role})),
                     skip:Object.assign({}, h.skip)})),
-    acur:acur, sel2:sel2, auto:autoSwitched});
+    acur:acur, sel2:sel2, off:offered});
 }
 function pushHist(){
   if(TOOL!=='arc') return;
@@ -666,16 +678,15 @@ function restore(js){
                       skip:h.skip||{}}));
   acur = Math.min(st.acur, HD.length-1);
   sel2 = st.sel2;
-  autoSwitched = !!st.auto;
+  offered = !!st.off;
   refit(); draw(); readout();
 }
 // The film has ONE head on most laterals and two on a rotated one, so the tool cannot
 // know when the reader is finished. It can know when they have named all three landmarks
 // on the head they are working on, and that is the moment to offer the second -- see
 // place().
-let autoSwitched=false;
-// true only between the hand-off and the reader's next click -- see place()
-let pendingSwitch=false;
+// one prompt per film, so finishing head 1 does not nag on every later click
+let offered=false;
 const newHd=()=>({pts:[], skip:{}});
 // The landmark the next click will become: the first of A,S,P neither placed nor skipped,
 // then '' for extras. This is a SUGGESTION, never a constraint -- see relabel().
@@ -1082,6 +1093,12 @@ function readout(){
   }
   el.className='ifarc '+cls;
   el.textContent=bits.join('   ')+qcbit+tag;
+  // the Submit button carries the verdict too: the header readout was there for the whole
+  // pilot and 80% of heads went out above tolerance regardless
+  const sb=$('btnsend');
+  if(sb){ sb.classList.toggle('warnbtn', cls!=='ok' && any);
+          sb.title = cls==='ok' ? 'the fit is inside tolerance'
+                                : 'the fit is looser than the tolerance — add rim points'; }
 }
 // Name the reader's existing clicks from the shape of what they drew. It never invents a
 // point -- it only decides which of the ones already on screen are the extremes, which is
@@ -1200,7 +1217,7 @@ function progress(p){
 async function load(){
   if(busy)return; busy=true;
   circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null;
-  HIST=[]; autoSwitched=false; pendingSwitch=false; readout();
+  HIST=[]; offered=false; badFit=false; readout();
   const t0=performance.now();
   try{
     const r=await fetch('/next',{headers:H()});
@@ -1298,13 +1315,33 @@ function outward(f,x,y){
   const dx=x-f.a, dy=y-f.b, L=Math.hypot(dx,dy);
   return L<1e-6 ? [0,-1] : [dx/L, dy/L];
 }
+let peek=false;                 // hold b: take every mark off and look at the film
 function drawArcs(){
   const bb=C.getBoundingClientRect();
   const k = bb.width>1 ? img.width/bb.width : 1;      // image px per screen px
   const lw=1.7*k, rr=5*k, fs=13*k, xh=7*k;
   const ctr=[];
+  if(peek) return;
   HD.forEach((h,kk)=>{
     const col=COL[kk%2], f=fits[kk], active=(kk===acur);
+    // A HEAD YOU ARE NOT WORKING ON COLLAPSES TO ITS CIRCLE.
+    //
+    // A reader put it plainly: the film gets too busy to make out where the cortical arc
+    // actually is, especially for the second head. On one small joint that was up to six
+    // squares, six letters, two uncertainty ellipses and the placement arrows, drawn over
+    // the very cortex being judged. The finished head keeps only what stops the same arc
+    // being marked twice -- its circle and its centre -- and gets out of the way.
+    if(HD.length>1 && !active){
+      if(f){
+        X.globalAlpha=0.28; X.strokeStyle=col; X.lineWidth=lw;
+        X.beginPath(); X.arc(f.a,f.b,f.R,0,7); X.stroke();
+        X.fillStyle=col;
+        X.beginPath(); X.arc(f.a,f.b,Math.max(2,lw*1.6),0,7); X.fill();
+        X.globalAlpha=1;
+        ctr.push([f.a,f.b]);
+      }
+      return;
+    }
     // The marks, always on top of the fit. Named landmarks are drawn as labelled squares
     // and extras as small rings, so a reader can see at a glance which of their clicks
     // are the three that get exported and which are only feeding the circle.
@@ -1573,52 +1610,29 @@ C.addEventListener('contextmenu',e=>e.preventDefault());   // right-drag is pann
 
 function place(e){
   if(!img.width)return;
+  badFit=false;
   const p=at(e);
   if(TOOL==='arc'){
     pushHist();
-    // THE HAND-OFF IS PROVISIONAL. Moving to head 2 after the third landmark is right on
-    // a rotated film and wrong on the far commoner one-head film, where the reader's next
-    // click is another rim point for the head they just finished -- and would otherwise
-    // start building a phantom second head on top of the first.
-    //
-    // The click itself says which it is. Land back inside head 1 and the hand-off is
-    // taken back; land anywhere else and it stands. Only the FIRST click after the switch
-    // is treated this way, so a genuine second head is not second-guessed later.
-    let tookBack=false;
-    if(pendingSwitch && acur===1 && HD[1] && !HD[1].pts.length){
-      pendingSwitch=false;
-      const f0=fits[0];
-      if(f0 && Math.hypot(p[0]*img.width-f0.a, p[1]*img.height-f0.b) <= 1.35*f0.R){
-        HD.splice(1,1); acur=0; sel2=null; tookBack=true;
-      }
-    }
     const h=HD[acur], r=nextRole(h);
     h.pts.push({x:p[0], y:p[1], role:r});
     sel2={arc:acur, i:h.pts.length-1};
     const nx=nextRole(h);
-    // Naming the third landmark completes a head, so the next click starts the SECOND
-    // one -- the common case on a rotated film, and it saves reaching for a key on every
-    // film that has two. Fires once per film, only from the first head, and h goes
-    // straight back if the reader wants to add rim points to head 1 instead.
-    if(r && !nx && !autoSwitched && HD.length===1){
-      // Its own undo step. The hand-off and the click that triggered it are one keystroke
-      // but two things in the reader's head, and Ctrl+Z should take back the hand-off --
-      // returning them to a complete head 1 -- rather than also deleting the landmark
-      // they had just got right.
-      pushHist();
-      autoSwitched=true; pendingSwitch=true;
-      HD.push(newHd()); acur=1; sel2=null;
-      refit(); draw(); readout();
-      msg('head 1 done \u2014 now HEAD 2. Only one head? press h');
+    refit(); draw(); readout();
+    // NO AUTOMATIC HAND-OFF. It used to move to head 2 the moment A, S and P were named,
+    // and the pilot shows what that did: three of four readers marked two heads on ~90%
+    // of films while the fourth marked one on 91%, and head-count mismatch rose from 50%
+    // of pairs under the circle tool to 56%. Being TOLD "now marking HEAD 2" reads as an
+    // instruction that a second head exists. Only the reader can see whether there are
+    // two arcs, so the tool offers once and waits.
+    if(r && !nx && HD.length===1 && !offered){
+      offered=true;
+      msg('head 1 named \u2014 now add rim points. TWO separate arcs? press h');
       return;
     }
-    refit(); draw(); readout();
-    // tookBack first: the trailing status line would otherwise overwrite the one thing
-    // the reader needs to know, which is that the tool just changed its mind for them.
-    msg(tookBack ? 'still head 1 \\u2014 rim point added (h for head 2)'
-        : !r ? (h.pts.length+' points on head '+(acur+1))
-        : nx ? (ROLE_NAME[r]+' marked \\u2014 now the '+ROLE_NAME[nx])
-             : 'all three marked \\u2014 add rim points to tighten it, or Submit');
+    msg(!r ? (h.pts.length+' points on head '+(acur+1))
+        : nx ? (ROLE_NAME[r]+' marked \u2014 now the '+ROLE_NAME[nx])
+             : 'all three named \u2014 add rim points to tighten the fit');
     return;
   }
   if(circles.length>=2)return;
@@ -1626,6 +1640,7 @@ function place(e){
   sel=circles.length-1;
   draw();
 }
+
 function undo(){
   if(TOOL==='arc'){
     if(!HIST.length){ msg('nothing to undo'); return; }
@@ -1640,6 +1655,7 @@ function undo(){
 // the most recent thing that happened.
 function delPoint(){
   if(TOOL!=='arc') return;
+  badFit=false;
   if(!sel2 || !HD[sel2.arc] || !HD[sel2.arc].pts[sel2.i]){
     msg('click a point first, then Delete to remove it'); return; }
   pushHist();
@@ -1667,7 +1683,6 @@ function skipRole(){
 // missed piece of the first rim after starting the second should not have to undo to it.
 function newHead(){
   if(TOOL!=='arc')return;
-  pendingSwitch=false;
   if(HD.length<2){
     if(HD[acur].pts.length<3){ msg('finish this head first — 3 points minimum'); return; }
     pushHist();
@@ -1691,7 +1706,7 @@ function toggleTool(){
   TOOL = (TOOL==='arc') ? 'circle' : 'arc';
   try{localStorage.setItem('annot_tool',TOOL)}catch(e){}
   circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null;
-  HIST=[]; autoSwitched=false; pendingSwitch=false;
+  HIST=[]; offered=false; badFit=false;
   applyTool(); draw(); readout();
   msg('tool: '+TOOL+' — marks cleared');
 }
@@ -1733,6 +1748,8 @@ async function post(url,fields){
    out of the network tab before the attempt.
 --------------------------------------------------------------------------- */
 let calMode=false, calTruth=null;
+// set when Submit was pressed on a fit the tool itself calls too loose
+let badFit=false;
 async function calibrate(){
   if(busy)return;
   const r=await fetch('/calib',{headers:H()});
@@ -1741,7 +1758,7 @@ async function calibrate(){
   calMode=true; calTruth=null;
   cur=j; nextId=null; nextImg=null;
   circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null;
-  HIST=[]; autoSwitched=false; pendingSwitch=false;
+  HIST=[]; offered=false; badFit=false;
   $('appui').classList.add('calib');
   const b=await fetch('/calib/film',{headers:H()});
   img=new Image();
@@ -1842,6 +1859,22 @@ async function send(){
     if(open.length){
       msg('still to mark: '+open.map(r=>ROLE_NAME[r]).join(', ')
           +' — or press k if it cannot be seen');return}
+    // THE ERROR BAR NOW BINDS. In the pilot, 80% of heads were submitted with the
+    // tool's own 2-sigma ABOVE the tolerance (median 0.0083 against 0.005), and 48% were
+    // fitted from three points and nothing else -- while the circle tool it replaced used
+    // the whole visible arc. Advice that everyone can ignore is not advice. This does not
+    // block a genuinely hard film: press Submit again and it goes.
+    const loose=use.filter(u=>2*u.f.e1/img.width > TOL);
+    if(loose.length && !badFit){
+      badFit=true;
+      const w=bestNextAngle(HD[acur].pts, fits[acur]);
+      msg('fit is \u00b1'+(2*loose[0].f.e1/img.width).toFixed(4)+', looser than '+TOL
+          +(w!==null ? ' \u2014 add a rim point on the '+rimName(w)+' margin'
+                     : ' \u2014 add rim points anywhere the cortex is clear')
+          +'. Submit again to send it anyway.');
+      draw(); readout();
+      return;
+    }
     const F=use.map(u=>u.f);
     // heads = the FITTED centres, unordered, in exactly the shape the circle tool sent --
     // so agreement, adjudication and the board keep working untouched.
@@ -1962,6 +1995,10 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='w')autoName();
   else if(e.key==='m')toggleFace();
   else if(e.key==='c')calibrate();
+  else if(e.key==='b' && !peek){ peek=true; draw(); }
+});
+document.addEventListener('keyup',e=>{
+  if(e.key==='b' && peek){ peek=false; draw(); }
 });
 window.addEventListener('resize', fit);
 // The header wraps as its contents change, which moves #stage without firing a window

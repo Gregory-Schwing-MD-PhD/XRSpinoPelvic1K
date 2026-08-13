@@ -328,9 +328,9 @@ with sync_playwright() as p:
     check(not pg.evaluate("HD[0].skip['A']"),
           "u undoes a skip -- it is a decision too, and it is invisible on the film")
 
-    print("\n[6b] the hand-off to the second head")
-    pg.evaluate("() => { HD=[newHd()]; acur=0; sel2=null; HIST=[]; "
-                "autoSwitched=false; pendingSwitch=false; fits=[]; draw(); }")
+    print("\n[6b] second heads are the reader's call")
+    pg.evaluate("() => { HD=[newHd()]; acur=0; sel2=null; HIST=[]; offered=false; "
+                "badFit=false; fits=[]; peek=false; draw(); }")
     box = pg.locator("#c").bounding_box()
 
     def click(deg, dx=0.0):
@@ -339,46 +339,26 @@ with sync_playwright() as p:
                        box["y"] + box["height"] * q[1])
         pg.wait_for_timeout(80)
 
-    for g in (180, 270, 0):                      # A, S, P on head 1
-        click(g)
-    check(pg.evaluate("HD.length") == 2 and pg.evaluate("acur") == 1,
-          "naming the third landmark hands over to head 2 on its own")
-    check(pg.evaluate("HD[0].pts.length") == 3 and pg.evaluate("HD[1].pts.length") == 0,
-          "head 1 keeps its three, head 2 starts empty")
-    check("HEAD 2" in pg.eval_on_selector("#msg", "e => e.textContent"),
-          "and the header says so, because a one-head film has to go back")
-
-    # THE HAND-OFF IS PROVISIONAL. On the far commoner one-head film the next click is
-    # another rim point for the head just finished, and taking it as head 2 would build a
-    # phantom head on top of the first -- the exact thing readers are told not to do.
-    click(225)
-    check(pg.evaluate("HD.length") == 1 and pg.evaluate("acur") == 0
-          and pg.evaluate("HD[0].pts.length") == 4,
-          "clicking back on head 1's own rim takes the hand-off back")
-    check("still head 1" in pg.eval_on_selector("#msg", "e => e.textContent"),
-          "and says so, rather than silently changing its mind")
-    click(315)
-    click(90)
-    check(pg.evaluate("HD.length") == 1 and pg.evaluate("HD[0].pts.length") == 6,
-          "so a reader adding rim points keeps adding them to the same head")
-    check("good" in pg.eval_on_selector("#fitread", "e => e.textContent"),
-          "which is what takes the fit from 'widen' to 'good'")
-
-    # ...while a click that is NOT on head 1 confirms it
-    pg.evaluate("() => { HD=[newHd()]; acur=0; sel2=null; HIST=[]; "
-                "autoSwitched=false; pendingSwitch=false; fits=[]; draw(); }")
     for g in (180, 270, 0):
         click(g)
-    click(270, dx=0.14)
-    check(pg.evaluate("HD.length") == 2 and pg.evaluate("HD[1].pts.length") == 1,
-          "a click away from head 1 confirms the hand-off and starts head 2")
+    check(pg.evaluate("HD.length") == 1, "finishing A/S/P does not create a second head")
+    click(225)
+    click(315)
+    check(pg.evaluate("HD.length") == 1 and pg.evaluate("HD[0].pts.length") == 5,
+          "later clicks keep going to the head in hand")
+    pg.keyboard.press("h")
+    pg.wait_for_timeout(120)
+    check(pg.evaluate("HD.length") == 2 and pg.evaluate("acur") == 1,
+          "h is what starts the second head, when the reader says so")
+    pg.keyboard.press("h")
+    pg.wait_for_timeout(120)
+    check(pg.evaluate("acur") == 0, "and h switches back")
 
     # a genuine second head fitted on top of the first is still called out
     put([(180, 'A'), (270, 'S'), (0, 'P')])
     put([(180, 'A'), (270, 'S'), (0, 'P')], head=1, dx=0.004)
     pg.wait_for_timeout(150)
     tag = pg.eval_on_selector("#fitread", "e => e.textContent")
-    print(f"       two fits on the same anatomy: {tag!r}")
     check("SAME head" in tag,
           "two centres almost on top of each other are called out, not accepted")
 
@@ -394,11 +374,8 @@ with sync_playwright() as p:
     check(pg.evaluate("HD[0].pts.length") == 3, "Ctrl+Z undoes the last click")
     pg.keyboard.press("Control+z")
     pg.wait_for_timeout(120)
-    # The hand-off is its own undo step, so taking it back leaves head 1 COMPLETE rather
-    # than also removing the landmark that triggered it.
-    check(pg.evaluate("HD[0].pts.length") == 3
-          and pg.evaluate("ROLES.filter(r=>roleAt(HD[0],r)).join('')") == "ASP",
-          "and the next Ctrl+Z takes back the hand-off, leaving head 1 complete")
+    check(pg.evaluate("HD[0].pts.length") == 2,
+          "and the next one goes back another click")
 
     # a RENAME must undo to the previous name, not delete the landmark -- the thing a
     # pop-the-last-point undo gets wrong
@@ -473,17 +450,23 @@ with sync_playwright() as p:
           "and a real 30-step drag moves the landmark it grabbed")
 
     print("\n[8] two heads, and what gets submitted")
-    put([(180, 'A'), (270, 'S'), (0, 'P'), (225, ''), (315, '')])
+    put([(180, 'A'), (270, 'S'), (0, 'P'), (225, ''), (315, ''), (90, '')])
     pg.keyboard.press("h")
     pg.wait_for_timeout(150)
     check(pg.evaluate("HD.length") == 2 and pg.evaluate("acur") == 1,
           "h starts a second head")
-    put([(180, 'A'), (270, 'S'), (0, 'P')], head=1, dx=90.0 / W, dy=12.0 / H)
+    put([(180, 'A'), (270, 'S'), (0, 'P'), (90, '')], head=1,
+        dx=90.0 / W, dy=12.0 / H)
     sent = []
     pg.on("request", lambda r: sent.append(r) if r.method == "POST"
           and r.url.endswith("/submit") else None)
+    # Submit is gated when the tool's own error bar is outside tolerance, so press
+    # until it goes: the second press is the deliberate "send it anyway".
     pg.evaluate("send()")
-    pg.wait_for_timeout(1000)
+    pg.wait_for_timeout(400)
+    if not sent:
+        pg.evaluate("send()")
+        pg.wait_for_timeout(900)
     m = re.search(r'name="points"\r?\n\r?\n(.*?)\r?\n--', sent[0].post_data if sent
                   else "", re.S)
     body = json.loads(m.group(1)) if m else {}
@@ -496,13 +479,128 @@ with sync_playwright() as p:
           "each marked as observed rather than derived")
     check(body.get("facing") == ["left", "left"],
           f"facing travels with the read ({body.get('facing')})")
-    check(len(body.get("extra", [[]])[0]) == 2,
+    check(len(body.get("extra", [[]])[0]) == 3,
           "extra rim points ride along, separately from the landmarks")
     check(body.get("tool") == "arc", "and the tool used is stamped on it")
     # the shape everything downstream already reads must be untouched
     check(all(isinstance(q, list) and len(q) == 2 for q in body.get("heads", [])),
           "heads is still a plain list of centres, so agreement and the board still work")
     pg.screenshot(path=str(SHOTS / "arc_two_heads.png"))
+
+    print("\n[8a] what the first round of the pilot broke")
+    pg.evaluate("() => { HD=[newHd()]; acur=0; sel2=null; HIST=[]; offered=false; "
+                "badFit=false; fits=[]; peek=false; draw(); }")
+    box = pg.locator("#c").bounding_box()
+
+    def clk(deg, dx=0.0):
+        # re-measure every time: a successful submit calls load(), which restores the pan
+        # and scrolls the canvas, so a box captured earlier aims at the wrong pixels
+        b = pg.locator("#c").bounding_box()
+        q = rim(deg)
+        pg.mouse.click(b["x"] + b["width"] * (q[0] + dx),
+                       b["y"] + b["height"] * q[1])
+        pg.wait_for_timeout(80)
+
+    # NO AUTOMATIC HAND-OFF. Three of four readers marked two heads on ~90% of films
+    # while the fourth marked one on 91%: being told "now marking HEAD 2" reads as an
+    # instruction that a second head exists, and only the reader can see whether it does.
+    for g in (180, 270, 0):
+        clk(g)
+    check(pg.evaluate("HD.length") == 1 and pg.evaluate("acur") == 0,
+          "naming A, S and P does NOT start a second head")
+    m = pg.eval_on_selector("#msg", "e => e.textContent")
+    check("press h" in m and "TWO" in m,
+          f"it offers one instead, and says what a second head looks like ({m!r})")
+    clk(225)
+    check(pg.evaluate("HD.length") == 1 and pg.evaluate("HD[0].pts.length") == 4,
+          "and the next click is a rim point for the head in hand, not a new head")
+
+    # THE ERROR BAR NOW BINDS. 80% of pilot heads were submitted with the tool's own
+    # 2 sigma above tolerance, and advice everyone ignores is not advice.
+    put([(180, 'A'), (270, 'S'), (0, 'P')])
+    two = pg.evaluate("2*fits[0].e1/img.width")
+    check(two > 0.005, f"a bare A/S/P fit is above tolerance ({two:.4f})")
+    sent = []
+    pg.on("request", lambda r: sent.append(r) if r.method == "POST"
+          and r.url.endswith("/submit") else None)
+    pg.evaluate("send()")
+    pg.wait_for_timeout(400)
+    check(not sent, "Submit on a loose fit does NOT send it")
+    m = pg.eval_on_selector("#msg", "e => e.textContent")
+    print(f"       first Submit says: {m!r}")
+    check("Submit again" in m and "margin" in m,
+          "it says how loose, where to click, and that a second press sends it anyway")
+    check("warnbtn" in pg.eval_on_selector("#btnsend", "e => e.className"),
+          "and the Submit button itself carries the warning")
+    pg.evaluate("send()")
+    pg.wait_for_timeout(900)
+    check(len(sent) >= 1,
+          "pressing Submit again does send it -- a hard film is not blocked")
+
+    # ...and adding points re-arms the gate rather than leaving it disarmed
+    sent.clear()
+    put([(180, 'A'), (270, 'S'), (0, 'P')])
+    pg.evaluate("send()")
+    pg.wait_for_timeout(300)
+    clk(90)
+    # read the fit BEFORE submitting: a successful send calls load(), which clears it
+    tight = pg.evaluate("2*fits[0].e1/img.width")
+    pg.evaluate("send()")
+    pg.wait_for_timeout(600)
+    check(len(sent) >= 1 and tight <= 0.005,
+          f"a rim point at the inferior margin takes it inside tolerance and it goes "
+          f"({tight:.4f})")
+
+    print("\n[8c] the film stops getting crowded")
+    put([(180, 'A'), (270, 'S'), (0, 'P')])
+    put([(180, 'A'), (270, 'S'), (0, 'P')], head=1, dx=0.13)
+    pg.evaluate("() => { acur=1; draw(); }")
+    pg.wait_for_timeout(200)
+    marks = pg.evaluate("""() => {
+        // count non-background pixels in a box around head 1, which is now the INACTIVE
+        // head: fewer marks means fewer coloured pixels over its cortex
+        const g=C.getContext('2d'), f=fits[0], R=Math.round(f.R*1.6);
+        const d=g.getImageData(Math.round(f.a-R), Math.round(f.b-R), 2*R, 2*R).data;
+        let n=0;
+        for(let i=0;i<d.length;i+=4){
+          // green channel well above red = the head-1 marker colour
+          if(d[i+1]>d[i]+40 && d[i+1]>90) n++;
+        }
+        return n;
+      }""")
+    pg.evaluate("() => { acur=0; draw(); }")
+    pg.wait_for_timeout(200)
+    marks_active = pg.evaluate("""() => {
+        const g=C.getContext('2d'), f=fits[0], R=Math.round(f.R*1.6);
+        const d=g.getImageData(Math.round(f.a-R), Math.round(f.b-R), 2*R, 2*R).data;
+        let n=0;
+        for(let i=0;i<d.length;i+=4){
+          if(d[i+1]>d[i]+40 && d[i+1]>90) n++;
+        }
+        return n;
+      }""")
+    print(f"       head-1 marker pixels: active {marks_active}, inactive {marks}")
+    check(marks < marks_active * 0.6,
+          f"the head you are not working on fades right back "
+          f"({marks_active} -> {marks} marker pixels)")
+    check(marks > 0, "but stays visible, so the same arc is not marked twice")
+
+    # hold b to blink every mark off
+    pg.evaluate("() => { acur=0; draw(); }")
+    pg.keyboard.down("b")
+    pg.wait_for_timeout(200)
+    blank = pg.evaluate("""() => {
+        const g=C.getContext('2d'), f=fits[0], R=Math.round(f.R*1.6);
+        const d=g.getImageData(Math.round(f.a-R), Math.round(f.b-R), 2*R, 2*R).data;
+        let n=0;
+        for(let i=0;i<d.length;i+=4) if(d[i+1]>d[i]+40 && d[i+1]>90) n++;
+        return n;
+      }""")
+    check(blank == 0, f"holding b blinks every mark off ({blank} marker pixels left)")
+    pg.keyboard.up("b")
+    pg.wait_for_timeout(200)
+    check(pg.evaluate("peek === false"), "and letting go puts them back")
+
 
     print("\n[8b] calibration: the one film with a known answer")
     pg.evaluate("() => calibrate()")
