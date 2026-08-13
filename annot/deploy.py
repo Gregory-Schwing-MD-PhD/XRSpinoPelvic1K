@@ -24,7 +24,10 @@ HERE = Path(__file__).resolve().parent
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--space", default="gregoryschwingmdphd/xrsp-femhead-annot")
+    # The live Space, and the only one that can be redeployed: creating a NEW Docker Space
+    # now needs PRO, so this default is not a preference, it is the one that exists. The
+    # ledger and image DATASET repos below are separate and keep their own names.
+    ap.add_argument("--space", default="gregoryschwingmdphd/spinesurg-ct-annotator")
     ap.add_argument("--annot-repo", default="gregoryschwingmdphd/xrsp-femhead-annot")
     ap.add_argument("--image-repo", default="gregoryschwingmdphd/xrsp-femhead-images")
     ap.add_argument("--adjudicators", default="gregoryschwingmdphd")
