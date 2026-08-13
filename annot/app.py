@@ -73,6 +73,7 @@ WHEN TO SKIP
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 import os
 import time
@@ -85,7 +86,14 @@ import store as store_mod  # noqa: E402  (sibling, as in review_service)
 
 ANNOT_REPO = os.environ.get("ANNOT_REPO", "")
 IMAGE_REPO = os.environ.get("IMAGE_REPO", "")
+# 3 days suited a 2000-film queue. On a 100-film pilot a reader who opens five films and
+# closes the tab takes 5% of the pool out of circulation until the weekend.
 CLAIM_TTL = int(os.environ.get("CLAIM_TTL_SECONDS", 3 * 24 * 3600))
+# LOCK_TOOL pins the annotation primitive. The Tool button sits in the header, and one
+# accidental press during a 100-film pilot drops circle-tool reads into a landmark-tool
+# ledger. The tool is stamped on every read so it stays analysable either way, but noise
+# in a pilot this small is not worth the convenience of switching.
+LOCK_TOOL = os.environ.get("LOCK_TOOL", "").strip()
 N_PRIMARY = 2
 # Consensus tolerance, as a fraction of image width. Judged in NORMALISED units so it
 # means the same thing on every film regardless of pixel size.
@@ -573,7 +581,10 @@ NOCACHE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTMLResponse(PAGE, headers=NOCACHE)
+    # LOCK_TOOL is stamped into the page rather than read by the client, so a reader
+    # cannot unlock the primitive with a query string or a localStorage edit.
+    return HTMLResponse(PAGE.replace("__LOCK__", json.dumps(LOCK_TOOL or False)),
+                        headers=NOCACHE)
 
 
 @app.get("/next")
@@ -833,15 +844,25 @@ def stats(u: dict = Depends(user)):
     settled = counts["final"] + counts["needs_adjudication"]
     counts["not_visible_rate_pct"] = (round(100 * nv_cases / settled, 1)
                                       if settled else None)
+    # THE DISTRIBUTION, not just the pass rate. The gate is 0.005 and the circle tool
+    # settled 71 of 1153 films against it -- so a tool that HALVED disagreement would
+    # still report "0% within tolerance" and read as a failure. Quartiles make an
+    # improvement visible even when nothing clears the bar, which is the honest way round:
+    # the right tolerance is an output of this pilot, not an input to it.
     agree_stats = None
     if agrees:
+        a = sorted(agrees)
+        q = lambda f: round(a[min(len(a) - 1, int(f * (len(a) - 1)))], 5)  # noqa: E731
         agree_stats = {
-            "n": len(agrees),
-            "median": round(statistics.median(agrees), 5),
-            "p90": round(sorted(agrees)[int(0.9 * (len(agrees) - 1))], 5),
-            "within_tol_pct": round(100 * sum(a <= CONSENSUS_TOL for a in agrees)
-                                    / len(agrees), 1),
+            "n": len(a),
+            "median": round(statistics.median(a), 5),
+            "p25": q(0.25), "p75": q(0.75), "p90": q(0.90),
+            "best": round(a[0], 5), "worst": round(a[-1], 5),
+            "within_tol_pct": round(100 * sum(x <= CONSENSUS_TOL for x in a) / len(a), 1),
             "tolerance": CONSENSUS_TOL,
+            # a coarse histogram in units of the tolerance, so the shape is visible
+            "hist": [sum(1 for x in a if k * CONSENSUS_TOL <= x < (k + 1) * CONSENSUS_TOL)
+                     for k in range(8)] + [sum(1 for x in a if x >= 8 * CONSENSUS_TOL)],
         }
     readers = sorted(({"annotator": k, **v} for k, v in by.items()),
                      key=lambda r: -r["reads"])
@@ -942,6 +963,129 @@ def review():
 @app.get("/board", response_class=HTMLResponse)
 def board():
     return HTMLResponse(BOARD, headers=NOCACHE)
+
+
+# -- calibration ---------------------------------------------------------------
+# One film with a KNOWN answer. Everything else here measures readers against each other,
+# which cannot detect the failure that matters most: both readers wrong the same way.
+# Agreement is perfectly happy with a centre that is 3 mm medial on every film.
+#
+# The truth is a sphere fitted to the femoral head at its contact with the acetabulum,
+# projected -- not an experienced reader's marks, which would make this a test of who
+# imitates that person best. Both heads superimpose on this projection, so one marked
+# head is correct and its centre IS the hip point.
+def _truth():
+    fp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calib_truth.json")
+    with open(fp, "rb") as fh:
+        return json.loads(fh.read())
+
+
+def _safe(name: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name)[:64]
+
+
+def _calib_read(uid: str):
+    try:
+        t = _store().b.read_text("calibration/%s.json" % _safe(uid))
+        return json.loads(t) if t else None
+    except Exception:                                          # noqa: BLE001
+        return None
+
+
+@app.get("/calib")
+def calib(u: dict = Depends(user)):
+    """The calibration case. Deliberately carries NO truth -- scoring happens on submit,
+    so the answer cannot be read out of the page before it is attempted."""
+    t = _truth()
+    return {"case_id": "CALIBRATION", "slot": 0, "image_url": "/calib/film",
+            "w": t["w"], "h": t["h"], "facing": t["facing"],
+            "done_before": bool(_calib_read(u["id"]))}
+
+
+@app.get("/calib/film")
+def calib_film():
+    here = os.path.dirname(os.path.abspath(__file__))
+    fp = os.path.join(here, "calib_film.jpg")
+    if not os.path.exists(fp):
+        raise HTTPException(404, "calibration film not bundled")
+    return Response(open(fp, "rb").read(), media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.post("/calib/submit")
+def calib_submit(points: str = Form(""), u: dict = Depends(user)):
+    """Score a calibration attempt and hand back BOTH the numbers and the truth.
+
+    Returning the truth is the point: the reader sees their own marks against the right
+    answer on the same film, immediately. It is the only moment in this exercise where
+    anyone finds out they are systematically off rather than merely inconsistent.
+    """
+    t = _truth()
+    p = json.loads(points) if points else {}
+    hs = heads(p)
+    if not hs:
+        raise HTTPException(400, "no marks")
+    W, H = float(t["w"]), float(t["h"])
+
+    def dist(a, b):
+        # fractions of image WIDTH throughout -- the unit the tolerance is written in
+        return math.hypot(a[0] - b[0], (a[1] - b[1]) * (H / W))
+
+    # A reader may have marked two heads on a film where they superimpose. Score the
+    # closer one, and record that they saw two: that is itself a finding.
+    ce = min(dist(h, t["centre"]) for h in hs)
+    lm = (p.get("landmarks") or [{}])[0]
+    per = {}
+    for k in ("A", "S", "P"):
+        d = lm.get(k) or {}
+        if d.get("src") == "obs" and d.get("xy"):
+            per[k] = round(dist(d["xy"], t["landmarks"][k]), 5)
+    mm = t["mm_per_px"] * W            # image width in mm: turns fractions into mm
+    res = {"annotator": u["id"], "at": _now(),
+           "centre_err": round(ce, 5), "centre_err_mm": round(ce * mm, 2),
+           "landmark_err": per,
+           "landmark_err_mm": {k: round(v * mm, 2) for k, v in per.items()},
+           "n_heads_marked": len(hs),
+           "radius_err_mm": (round((p.get("radii", [0])[0] - t["radius"]) * mm, 2)
+                             if p.get("radii") else None),
+           "facing_right": (p.get("facing") or [""])[0] == t["facing"],
+           "tolerance": CONSENSUS_TOL, "points": p}
+    prev = _calib_read(u["id"]) or {"attempts": []}
+    prev.setdefault("attempts", []).append(res)
+    prev["annotator"] = u["id"]
+    prev["best_centre_err"] = min(a["centre_err"] for a in prev["attempts"])
+    # written straight through rather than queued with the case flusher: a reader is
+    # staring at the result, and a calibration lost to a restart is a calibration redone
+    _store().b.write_text("calibration/%s.json" % _safe(u["id"]),
+                          json.dumps(prev, indent=1))
+    return {"score": res, "truth": t, "attempt": len(prev["attempts"])}
+
+
+@app.get("/calib/board")
+def calib_board(u: dict = Depends(user)):
+    """Every reader's calibration: absolute accuracy, which agreement cannot give."""
+    out = []
+    b = _store().b
+    try:
+        paths = [q for q in b.list("calibration/") if q.endswith(".json")]
+    except Exception:                                          # noqa: BLE001
+        paths = []
+    for path in paths:
+        try:
+            r = json.loads(b.read_text(path) or "{}")
+        except Exception:                                      # noqa: BLE001
+            continue
+        a = r.get("attempts") or []
+        if not a:
+            continue
+        out.append({"annotator": r.get("annotator", "?"), "attempts": len(a),
+                    "first_centre_err": a[0]["centre_err"],
+                    "best_centre_err": r.get("best_centre_err"),
+                    "last_mm": a[-1]["centre_err_mm"],
+                    "landmark_mm": a[-1]["landmark_err_mm"],
+                    "facing_right": a[-1]["facing_right"]})
+    return {"readers": sorted(out, key=lambda r: r["best_centre_err"]),
+            "tolerance": CONSENSUS_TOL}
 
 
 def heads(p: Optional[dict]) -> list:

@@ -504,6 +504,52 @@ with sync_playwright() as p:
           "heads is still a plain list of centres, so agreement and the board still work")
     pg.screenshot(path=str(SHOTS / "arc_two_heads.png"))
 
+    print("\n[8b] calibration: the one film with a known answer")
+    pg.evaluate("() => calibrate()")
+    pg.wait_for_function("calMode === true", timeout=20000)
+    pg.wait_for_timeout(700)
+    check(pg.evaluate("cur.case_id") == "CALIBRATION", "the calibration film loads")
+    # The truth must not be reachable before the attempt, or this is a reading test
+    # rather than a measurement of the reader.
+    check(pg.evaluate("calTruth === null"),
+          "and no truth reaches the page before it is attempted")
+    body = pg.evaluate("async () => (await fetch('/calib',{headers:H()})).text()")
+    check("landmarks" not in body and '"centre"' not in body,
+          f"nor does the /calib payload leak it ({body[:70]})")
+
+    # mark it deliberately 6 px low and see whether it says so, in millimetres
+    T = json.loads((ROOT / "calib_truth.json").read_text())
+    off = 6.0 / T["h"]
+    pg.evaluate("""([t,off]) => {
+        HD=[newHd()]; acur=0; sel2=null;
+        ['A','S','P'].forEach(r=>HD[0].pts.push(
+            {x:t.landmarks[r][0], y:t.landmarks[r][1]+off, role:r}));
+        refit(); draw(); }""", [T, off])
+    pg.evaluate("send()")
+    pg.wait_for_function("calTruth !== null", timeout=20000)
+    pg.wait_for_timeout(400)
+    txt = pg.eval_on_selector("#calbox", "e => e.textContent")
+    print(f"       calibration says: {txt[:110]!r}")
+    check(not pg.eval_on_selector("#calbox", "e => e.hidden"),
+          "submitting shows the score")
+    mm = 6.0 * T["mm_per_px"]
+    check(f"{mm:.1f} mm" in txt,
+          f"and the centre error is right: marked {mm:.1f} mm low, and it says so")
+    check(pg.evaluate("calTruth !== null"),
+          "the truth comes back only AFTER the attempt, and is drawn on the film")
+    check("attempt 1" in txt.lower(), "attempts are numbered")
+
+    # a wrong facing silently mirrors every A/P label, so it has to be called out
+    pg.evaluate("() => { FACE = FACE === 'left' ? 'right' : 'left'; }")
+    pg.evaluate("send()")
+    pg.wait_for_timeout(900)
+    check("wrong way round" in pg.eval_on_selector("#calbox", "e => e.textContent"),
+          "marking with the wrong facing is called out")
+    pg.evaluate("() => { FACE='left'; leaveCalib(); }")
+    pg.wait_for_timeout(900)
+    check(pg.evaluate("calMode === false"), "and you can get back to reading")
+
+
     print("\n[9] guard rails")
     pg.evaluate("""() => { HD=[newHd()]; acur=0;
         HD[0].pts.push({x:0.4,y:0.30,role:'A'},{x:0.5,y:0.30,role:'S'},

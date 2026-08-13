@@ -378,6 +378,21 @@ STYLE = """
  .lmlist li{margin:4px 0}
  .lmA,.lmS,.lmP{font-variant-numeric:tabular-nums}
  .lmA{color:#7cc4ff}.lmS{color:#00E5A0}.lmP{color:#f5a524}
+ /* The calibration result sits over the film rather than beside it: the reader has to
+    look at the truth drawn on their own marks, not at a number in another column. */
+ #calbox{position:absolute;top:14px;right:14px;width:300px;background:#15151bee;
+         border:1px solid #3a3a44;border-radius:10px;padding:14px 16px;z-index:5;
+         backdrop-filter:blur(3px)}
+ #calbox h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;
+            letter-spacing:.1em;color:#8a94a0}
+ #calbox .big{font-size:15px;margin:0 0 10px}
+ #calbox .big b{font-size:30px;font-variant-numeric:tabular-nums;display:block}
+ #calbox .sub{color:#8a94a0;font-size:11.5px}
+ #calbox table{margin:6px 0 10px}
+ #calbox td{padding:3px 8px;border-bottom:1px solid #2a2a33;font-size:12.5px}
+ #calbox .warn2{background:#241d0c;border-left:3px solid var(--warn);padding:6px 8px;
+                font-size:12px;margin:8px 0}
+ .calib #guide, .calib #example{opacity:.35}
  .ok{color:var(--lft)}.mid{color:var(--warn)}.bad{color:var(--rgt)}
  /* fixed width: this text changes on every scroll, and a header that
     re-wraps when it grows moves the film out from under the cursor. */
@@ -450,6 +465,13 @@ STYLE = """
     letter-spacing:.08em}
  td.n{text-align:right;font-variant-numeric:tabular-nums}
  .cards{display:flex;gap:12px;flex-wrap:wrap;margin:14px 0}
+ .hist{display:flex;align-items:flex-end;gap:4px;height:110px;margin:8px 0 4px}
+ .bar2{width:44px;display:flex;flex-direction:column;justify-content:flex-end;
+       align-items:center;height:100%}
+ .bar2>i{display:block;width:100%;background:var(--go);border-radius:3px 3px 0 0;
+         min-height:2px}
+ .bar2>span{font-size:10.5px;color:#8a94a0;margin-top:4px}
+ .sub{color:#8a94a0;font-size:11.5px}
  .card{background:#1b1b22;border:1px solid #2a2a33;border-radius:8px;padding:12px 16px;
        min-width:140px}
  .card b{display:block;font-size:26px;font-variant-numeric:tabular-nums}
@@ -508,7 +530,9 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
             border:1px solid #3a3a44">Board</a>
   <button class=ghost onclick=toggleGuide()>Guide <kbd>g</kbd></button>
   <button class=ghost onclick=toggleEx()>Example <kbd>x</kbd></button>
-  <button class=ghost onclick=toggleTool()
+  <button class=ghost id=btncal onclick=calibrate()
+    title="a film with a known answer. Mark it and you are told exactly how far off you were — the one measurement inter-reader agreement cannot give you.">Calibrate <kbd>c</kbd></button>
+  <button class=ghost id=btntool onclick=toggleTool()
     title="which primitive gives better agreement is an empirical question — the tool used is recorded on every read">Tool: <b id=toolname>arc</b></button>
   <span id=qcread class=ifarc title="live edge strength under the cursor, ranked against the surrounding film. The subchondral cortex is a structural edge; flat joint space and flat cancellous bone are not. An arrow points at the nearest stronger edge within a nudge."></span>
   <span id=fitread class=ifarc title="how tightly your points constrain the centre. 2σ of the fitted centre, as a fraction of image width; the consensus tolerance is 0.005."></span>
@@ -521,6 +545,7 @@ PAGE = """<!doctype html><html lang=en><meta charset=utf-8>
 """ + CRITERIA + """
   <section id=stage>
     <div id=wrap><canvas id=c></canvas></div>
+    <aside id=calbox hidden></aside>
   </section>
 """ + EXAMPLES + """
 </main>
@@ -577,10 +602,12 @@ let guideOn=true, exOn=true;
    Which primitive actually agrees better between readers is an empirical question, so
    both stay available and the tool is stamped into every submission.
 --------------------------------------------------------------------------- */
+const LOCKED = __LOCK__;
 let TOOL='arc';
 try{ TOOL = new URLSearchParams(location.search).get('tool')
           || localStorage.getItem('annot_tool') || 'arc'; }catch(e){}
 if(TOOL!=='circle') TOOL='arc';
+if(LOCKED) TOOL = LOCKED === 'circle' ? 'circle' : 'arc';
 
 const ROLES=['A','S','P'];
 // WHICH WAY THE PATIENT FACES, asserted once and then sticky.
@@ -1228,7 +1255,7 @@ function draw(){
   X.drawImage(img,0,0);
   X.filter='none';
   const lw=Math.max(1.5, img.width/700);
-  if(TOOL==='arc'){ drawArcs(); return; }
+  if(TOOL==='arc'){ drawArcs(); drawTruth(); return; }
   circles.forEach((c,i)=>{
     // 1st / 2nd circle, NOT left/right -- a lateral cannot tell you which is which
     X.strokeStyle = i===0 ? '#00E5A0' : '#FF3B30';
@@ -1652,11 +1679,15 @@ function newHead(){
   draw(); readout();
 }
 function applyTool(){
+  const bt=$('btntool'); if(bt) bt.style.display = LOCKED ? 'none' : '';
   document.body.classList.toggle('tool-arc', TOOL==='arc');
   document.body.classList.toggle('tool-circle', TOOL==='circle');
   const t=$('toolname'); if(t) t.textContent=TOOL;
 }
 function toggleTool(){
+  // LOCKED during a pilot: one accidental press drops circle-tool reads into a
+  // landmark-tool ledger, and in a 100-film study that is a real fraction of the data.
+  if(LOCKED){ msg('the tool is fixed for this study'); return; }
   TOOL = (TOOL==='arc') ? 'circle' : 'arc';
   try{localStorage.setItem('annot_tool',TOOL)}catch(e){}
   circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null;
@@ -1685,7 +1716,117 @@ async function post(url,fields){
   if(!r.ok){msg('error: '+(await r.text()).slice(0,120));return null}
   return r.json();
 }
+
+/* ---------------------------------------------------------------------------
+   CALIBRATION: the one film where the answer is known.
+
+   Every other number in this study is reader-vs-reader, which cannot see the failure
+   that matters most -- both readers wrong the same way. Agreement is perfectly content
+   with a centre that is 3 mm medial on every film.
+
+   So one film has ground truth: a sphere fitted to the femoral head at its contact with
+   the acetabulum, projected. Mark it, submit, and the truth is drawn over your own marks
+   with the distances in millimetres. It teaches faster than the guide does, and it gives
+   the study absolute accuracy per reader rather than mutual consistency.
+
+   The truth is NOT sent to the page until after the submission, or it would be readable
+   out of the network tab before the attempt.
+--------------------------------------------------------------------------- */
+let calMode=false, calTruth=null;
+async function calibrate(){
+  if(busy)return;
+  const r=await fetch('/calib',{headers:H()});
+  if(!r.ok){ msg('calibration film not available'); return; }
+  const j=await r.json();
+  calMode=true; calTruth=null;
+  cur=j; nextId=null; nextImg=null;
+  circles=[]; sel=-1; HD=[newHd()]; acur=0; fits=[]; sel2=null;
+  HIST=[]; autoSwitched=false; pendingSwitch=false;
+  $('appui').classList.add('calib');
+  const b=await fetch('/calib/film',{headers:H()});
+  img=new Image();
+  img.onload=()=>{ C.width=img.width; C.height=img.height; showWL(); fit();
+                   refit(); draw(); readout(); restorePan();
+                   setTimeout(()=>{buildQC(); refit(); draw(); readout();},0);
+                   msg('CALIBRATION \u2014 mark this head as usual, then Submit'); };
+  img.src=URL.createObjectURL(await b.blob());
+}
+async function calSubmit(){
+  const use=HD.map((h,k)=>({h:h,f:fits[k]})).filter(u=>u.h.pts.length>0);
+  if(!use.length || use.some(u=>!u.f)){ msg('mark the head first'); return; }
+  const F=use.map(u=>u.f);
+  const payload={tool:'arc',
+    heads:F.map(f=>[f.a/img.width, f.b/img.height]),
+    radii:F.map(f=>f.R/img.width),
+    landmarks:use.map(u=>{const o={};
+      ROLES.forEach(r=>{const q=roleAt(u.h,r);
+        o[r]= q ? {xy:[+q.x.toFixed(5), +q.y.toFixed(5)], src:'obs'} : {src:'derived'};});
+      return o;}),
+    facing:F.map(()=>FACE), w:img.width, h:img.height};
+  const j=await post('/calib/submit', {points:JSON.stringify(payload)});
+  if(!j) return;
+  calTruth=j.truth;
+  draw();
+  showScore(j.score, j.attempt);
+}
+// The truth, drawn over the reader's own marks on the same film. Seeing the two together
+// is the teaching; the numbers alone would not move anyone's hand.
+function drawTruth(){
+  if(!calTruth) return;
+  const bb=C.getBoundingClientRect();
+  const k = bb.width>1 ? img.width/bb.width : 1;
+  const lw=1.9*k, rr=5*k, fs=13*k;
+  const tc=[calTruth.centre[0]*img.width, calTruth.centre[1]*img.height];
+  const R=calTruth.radius*img.width;
+  X.setLineDash([lw*3,lw*3]); X.strokeStyle='#ffffff'; X.lineWidth=lw;
+  X.beginPath(); X.arc(tc[0],tc[1],R,0,7); X.stroke(); X.setLineDash([]);
+  ROLES.forEach(r=>{
+    const q=calTruth.landmarks[r];
+    const x=q[0]*img.width, y=q[1]*img.height;
+    X.strokeStyle='#ffffff'; X.lineWidth=lw;
+    X.beginPath(); X.moveTo(x-rr,y-rr); X.lineTo(x+rr,y+rr);
+    X.moveTo(x+rr,y-rr); X.lineTo(x-rr,y+rr); X.stroke();
+  });
+  const t=9*k;
+  X.strokeStyle='#ffffff'; X.lineWidth=lw*1.4;
+  X.beginPath(); X.moveTo(tc[0]-t,tc[1]); X.lineTo(tc[0]+t,tc[1]);
+  X.moveTo(tc[0],tc[1]-t); X.lineTo(tc[0],tc[1]+t); X.stroke();
+  X.font='bold '+fs+'px system-ui'; X.textAlign='left'; X.textBaseline='middle';
+  X.lineWidth=fs*0.3; X.strokeStyle='rgba(0,0,0,.85)';
+  X.strokeText('truth', tc[0]+t*1.4, tc[1]-t);
+  X.fillStyle='#ffffff'; X.fillText('truth', tc[0]+t*1.4, tc[1]-t);
+}
+function showScore(sc, n){
+  const mm=v=>v==null?'—':v.toFixed(1)+' mm';
+  const cls = sc.centre_err<=TOL ? 'ok' : (sc.centre_err<=2*TOL ? 'mid' : 'bad');
+  const rows=ROLES.map(r=>'<tr><td>'+ROLE_NAME[r]+'</td><td class=n>'
+      +(sc.landmark_err_mm[r]===undefined?'not marked':mm(sc.landmark_err_mm[r]))
+      +'</td></tr>').join('');
+  $('calbox').innerHTML=
+    '<h3>Calibration \u2014 attempt '+n+'</h3>'
+    +'<p class=big><b class='+cls+'>'+mm(sc.centre_err_mm)+'</b> from the true hip point'
+    +'<br><span class=sub>'+sc.centre_err.toFixed(4)+' of image width; the agreement '
+    +'tolerance is '+sc.tolerance+'</span></p>'
+    +'<table>'+rows+'</table>'
+    +(sc.facing_right?'':'<p class=warn2>Your <b>facing</b> was the wrong way round '
+      +'&mdash; A and P are swapped.</p>')
+    +(sc.n_heads_marked>1?'<p class=warn2>You marked two heads. On this projection the '
+      +'two superimpose exactly, so there is only one.</p>':'')
+    +'<p class=sub>The white dashed circle and crosses are the truth, drawn on your film. '
+    +'The truth is a sphere fitted to the head at its contact with the acetabulum, '
+    +'projected &mdash; not another reader\u2019s opinion.</p>'
+    +'<p><button class=go onclick=calibrate()>Try again</button> '
+    +'<button class=sk onclick=leaveCalib()>Back to reading</button></p>';
+  $('calbox').hidden=false;
+}
+function leaveCalib(){
+  calMode=false; calTruth=null;
+  $('calbox').hidden=true; $('appui').classList.remove('calib');
+  load();
+}
+
 async function send(){
+  if(calMode){ return calSubmit(); }
   if(!cur){return}
   let payload;
   if(TOOL==='arc'){
@@ -1820,6 +1961,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='e')relabel('');
   else if(e.key==='w')autoName();
   else if(e.key==='m')toggleFace();
+  else if(e.key==='c')calibrate();
 });
 window.addEventListener('resize', fit);
 // The header wraps as its contents change, which moves #stage without firing a window
@@ -1873,14 +2015,34 @@ async function tick(){
     +'</td><td class=n>'+x.reads+'</td><td class=n>'+x.not_visible
     +'</td><td class=n>'+(100*x.reads/tot).toFixed(0)+'%</td></tr>').join('')
     || '<tr><td colspan=4 style="color:#888">no reads yet</td></tr>';
-  $('agree').innerHTML = j.agreement
+  // THE DISTRIBUTION, not a pass rate. The gate is 0.005 and the circle tool settled
+  // 71 of 1153 films against it, so a tool that halved disagreement would still read
+  // "0% within tolerance" and look like a failure. Quartiles and a histogram make an
+  // improvement visible even when nothing clears the bar -- and the right tolerance is
+  // an output of this pilot, not an input to it.
+  const g=j.agreement;
+  $('agree').innerHTML = g
     ? '<div class=cards>'
-      + card(j.agreement.within_tol_pct+'%','within tolerance',
-             'both readers within '+j.agreement.tolerance+' of image width')
-      + card(j.agreement.median,'median disagreement','fraction of image width')
-      + card(j.agreement.p90,'90th percentile')
-      + card(j.agreement.n,'doubly-read films') + '</div>'
-    : '<p style="color:#888">No film has two marked reads yet.</p>';
+      + card(g.median,'median disagreement','half the films are tighter than this')
+      + card(g.p25+' – '+g.p75,'middle half (IQR)')
+      + card(g.p90,'90th percentile','the tail that drives adjudication')
+      + card(g.within_tol_pct+'%','within tolerance',
+             'both readers within '+g.tolerance+' of image width')
+      + '</div>'
+      + '<div class=hist>'
+      + g.hist.map((n,idx)=>{
+          const mx=Math.max.apply(null,g.hist)||1;
+          const lab=idx<8 ? (idx*g.tolerance).toFixed(3)+'–'+((idx+1)*g.tolerance).toFixed(3)
+                          : '≥ '+(8*g.tolerance).toFixed(3);
+          return '<div class=bar2 title="'+n+' films, '+lab+'">'
+               + '<i style="height:'+(100*n/mx).toFixed(0)+'%"></i>'
+               + '<span>'+(idx<8?idx+1:'8+')+'</span></div>';
+        }).join('')
+      + '</div>'
+      + '<p class=sub>Histogram in multiples of the tolerance ('+g.tolerance
+      + '). Bar 1 is inside it. n='+g.n+', best '+g.best+', worst '+g.worst+'.</p>'
+    : '<p style="color:#888">no film has two reads yet</p>';
+
   $('foot').textContent='pending writes: '+j.pending_writes
     +'  ·  refreshed '+new Date().toLocaleTimeString();
 }

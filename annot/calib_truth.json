@@ -1,0 +1,33 @@
+{
+ "w": 743,
+ "h": 1200,
+ "mm_per_px": 0.35,
+ "centre": [
+  0.305546105362975,
+  0.7479805020944307
+ ],
+ "radius": 0.08599868557865324,
+ "landmarks": {
+  "S": [
+   0.3055461053629752,
+   0.6947329826069809
+  ],
+  "A": [
+   0.21954741978432177,
+   0.7479805020944306
+  ],
+  "P": [
+   0.3915447909416287,
+   0.7479805020944306
+  ]
+ },
+ "facing": "left",
+ "source": "DRR of a segmented CT; femoral head = sphere fitted to the articular surface at its contact with the acetabulum, projected",
+ "sphere_fit_rms_mm": 2.03,
+ "nearest_surface_voxel_mm": {
+  "S": 0.76,
+  "A": 0.69,
+  "P": 0.63
+ },
+ "note": "Both femoral heads superimpose on this projection, so ONE marked head is correct and its centre is the bicoxofemoral point itself."
+}

@@ -37,6 +37,14 @@ def main() -> int:
                     default="gregoryschwingmdphd/xrsp-femhead-asp-pilot")
     ap.add_argument("--image-repo", default="gregoryschwingmdphd/xrsp-femhead-images")
     ap.add_argument("--adjudicators", default="gregoryschwingmdphd")
+    ap.add_argument("--lock-tool", default="arc",
+                    help="pin the annotation primitive ('' to allow switching). One "
+                         "accidental press of the Tool button drops circle-tool reads "
+                         "into a landmark-tool ledger.")
+    ap.add_argument("--claim-ttl", type=int, default=4 * 3600,
+                    help="seconds a claimed film stays claimed. 3 days suited a 2000-film "
+                         "queue; on a 100-film pilot a reader who closes the tab takes "
+                         "5%% of the pool out until the weekend.")
     ap.add_argument("--private", action="store_true",
                     help="private Space; readers then need to be added as collaborators")
     a = ap.parse_args()
@@ -84,8 +92,13 @@ def main() -> int:
                          "deploy.py"],
         commit_message="deploy femoral-head annotator")
 
+    # LOCK_TOOL and a short CLAIM_TTL are pilot settings, set here rather than by hand so
+    # a redeploy cannot quietly drop them -- which is exactly how ANNOT_REPO reverted the
+    # Space to the finished ledger once already.
     for k, v in {"ANNOT_REPO": a.annot_repo, "IMAGE_REPO": a.image_repo,
-                 "ADJUDICATORS": a.adjudicators}.items():
+                 "ADJUDICATORS": a.adjudicators,
+                 "LOCK_TOOL": a.lock_tool,
+                 "CLAIM_TTL_SECONDS": str(a.claim_ttl)}.items():
         api.add_space_variable(a.space, k, v)
     # The ledger write token. A secret, not a variable: variables are visible in the UI.
     api.add_space_secret(a.space, "HF_TOKEN", token)
