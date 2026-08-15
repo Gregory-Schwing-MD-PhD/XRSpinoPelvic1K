@@ -362,6 +362,39 @@ with sync_playwright() as p:
     check("SAME head" in tag,
           "two centres almost on top of each other are called out, not accepted")
 
+    # STACKED vs SIDE BY SIDE. The guide has always said rotation separates the heads
+    # front-to-back, so a real pair sits side by side and is the same diameter. It was
+    # never checked, and in the pilot 60% of two-head reads were stacked more vertically
+    # than horizontally -- median 59 degrees, where a real pair is near 0.
+    put([(180, 'A'), (270, 'S'), (0, 'P')])
+    put([(180, 'A'), (270, 'S'), (0, 'P')], head=1, dy=0.10)     # stacked below
+    pg.wait_for_timeout(150)
+    tag = pg.eval_on_selector("#fitread", "e => e.textContent")
+    print(f"       stacked pair: {tag[-70:]!r}")
+    check("STACKED" in tag and "FRONT-TO-BACK" in tag,
+          "two heads stacked vertically are called out")
+    put([(180, 'A'), (270, 'S'), (0, 'P')])
+    put([(180, 'A'), (270, 'S'), (0, 'P')], head=1, dx=0.13)     # side by side
+    pg.wait_for_timeout(150)
+    tag = pg.eval_on_selector("#fitread", "e => e.textContent")
+    check("STACKED" not in tag and "SAME head" not in tag,
+          f"but a genuine side-by-side pair is left alone ({tag[-40:]!r})")
+
+    # ...and two circles of obviously different size are not one pair of heads
+    pg.evaluate("""() => {
+        HD=[newHd(), newHd()];
+        [[180,'A'],[270,'S'],[0,'P']].forEach(([g,r])=>{
+          const t=g*Math.PI/180;
+          HD[0].pts.push({x:%f+%f*Math.cos(t), y:%f+%f*Math.sin(t), role:r});
+          HD[1].pts.push({x:%f+%f*Math.cos(t)*1.45, y:%f+%f*Math.sin(t)*1.45, role:r});
+        });
+        acur=0; refit(); draw(); readout(); }""" % (
+        CX, CR, CY, CR * (W / H), CX + 0.16, CR, CY, CR * (W / H)))
+    pg.wait_for_timeout(150)
+    tag = pg.eval_on_selector("#fitread", "e => e.textContent")
+    check("differ in size" in tag,
+          f"two circles of different diameter are called out ({tag[-46:]!r})")
+
     print("\n[6c] undo and delete")
     pg.evaluate("() => { HD=[newHd()]; acur=0; sel2=null; HIST=[]; "
                 "autoSwitched=false; pendingSwitch=false; fits=[]; draw(); }")

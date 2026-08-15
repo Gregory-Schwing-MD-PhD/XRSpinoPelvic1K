@@ -1079,10 +1079,30 @@ function readout(){
   // so say so rather than accepting it.
   const F2=fits.filter(Boolean);
   if(F2.length===2){
-    const d=Math.hypot(F2[0].a-F2[1].a, F2[0].b-F2[1].b);
+    const dx=Math.abs(F2[0].a-F2[1].a), dy=Math.abs(F2[0].b-F2[1].b);
+    const d=Math.hypot(dx,dy);
     if(d < 0.5*(F2[0].R+F2[1].R)*0.5){
       tag += '  \u2190 these two are the SAME head (press h, then u)';
       cls='bad';
+    } else {
+      // THE RULE THE GUIDE ALREADY STATES, NOW ACTUALLY CHECKED. Rotation separates the
+      // heads FRONT-TO-BACK, so a real pair sits side by side and is the same diameter.
+      // In the pilot 60% of two-head reads were stacked more vertically than
+      // horizontally and half were steeply stacked -- median 59 degrees, where a real
+      // pair is near 0 -- and the two circles differed in diameter by a median 1.18x.
+      // Every one of those violated a rule written three paragraphs into the guide and
+      // tested nowhere.
+      const ang=Math.atan2(dy,dx)*180/Math.PI;
+      const ratio=Math.max(F2[0].R,F2[1].R)/Math.max(1e-6,Math.min(F2[0].R,F2[1].R));
+      if(ang>45){
+        tag += '  \u2190 STACKED not side by side ('+Math.round(ang)
+             + '\u00b0): two heads separate FRONT-TO-BACK';
+        cls='bad';
+      } else if(ratio>1.25){
+        tag += '  \u2190 the two differ in size by '+ratio.toFixed(2)
+             + 'x: real heads are the SAME diameter';
+        cls='bad';
+      }
     }
   }
   if(all.length && onc<all.length && cls==='ok') cls='mid';
